@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.vscode/
+
+# Ignore large JSONs
+*.json
+
+# Keep samples
+!sample_*.json
