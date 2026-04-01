@@ -88,24 +88,30 @@ def parse_tracking_plan(uploaded_file):
     return plan
 
 
-def fetch_amplitude_events(api_key, project_id, days_back=90):
-    """Fetch events from Amplitude using the Dashboard REST API."""
-    end   = datetime.utcnow()
-    start = end - timedelta(days=days_back)
+def fetch_amplitude_events(api_key, project_id=None, days_back=90):
+    """Fetch events from Amplitude using the Dashboard REST API.
 
+    Always returns a (data, error) tuple where data is a list or None.
+    """
     url = "https://amplitude.com/api/2/events/list"
     try:
         r = requests.get(url, auth=(api_key, ""), timeout=15)
         if r.status_code == 200:
-            return r.json().get("data", [])
+            return r.json().get("data", []), None
         else:
             return None, f"Amplitude API error {r.status_code}: {r.text[:300]}"
     except Exception as e:
         return None, str(e)
 
 
-def fetch_amplitude_export(api_key, secret_key, days_back=7):
-    """Use Amplitude Export API to pull raw events."""
+def fetch_amplitude_export(api_key, secret_key, project_id=None, days_back=30):
+    """Use Amplitude Export API to pull raw events.
+
+    Always returns a (data, error) tuple where data is a list or None.
+    """
+    if not api_key or not secret_key:
+        return None, "Both API Key and Secret Key are required for the Export API."
+
     end   = datetime.utcnow()
     start = end - timedelta(days=days_back)
 
@@ -114,6 +120,9 @@ def fetch_amplitude_export(api_key, secret_key, days_back=7):
         "start": start.strftime("%Y%m%dT%H"),
         "end":   end.strftime("%Y%m%dT%H"),
     }
+    if project_id:
+        params["project_id"] = project_id
+
     try:
         r = requests.get(url, params=params, auth=(api_key, secret_key), timeout=30)
         if r.status_code == 200:
@@ -122,11 +131,20 @@ def fetch_amplitude_export(api_key, secret_key, days_back=7):
                 if line.strip():
                     try:
                         events.append(json.loads(line))
-                    except:
+                    except Exception:
                         pass
             return events, None
         else:
-            return None, f"Export API error {r.status_code}: {r.text[:300]}"
+            try:
+                err_body = r.json()
+                err_msg  = err_body.get("error", {}).get("message", r.text[:300])
+            except Exception:
+                err_msg = r.text[:300]
+            return None, (
+                f"Export API error {r.status_code}: {err_msg}. "
+                "Check that your API Key, Secret Key, and Project ID are correct "
+                "and that raw data export is enabled for this project."
+            )
     except Exception as e:
         return None, str(e)
 
@@ -362,13 +380,16 @@ with st.sidebar:
     amplitude_api_key = st.text_input(
         "API Key",
         type="password",
-        value="ea3eef799cfae7dfcd3f25cad701c6da",
         help="Amplitude project API key"
     )
     amplitude_secret = st.text_input(
         "Secret Key",
         type="password",
-        help="Amplitude secret key (for Export API)"
+        help="Amplitude secret key (required for Export API)"
+    )
+    amplitude_project_id = st.text_input(
+        "Project ID",
+        help="Amplitude project ID (optional; used with Export API)"
     )
 
     st.subheader("3. Data range")
@@ -431,14 +452,14 @@ if run_btn or local_file:
     elif run_btn and amplitude_api_key:
         with st.spinner("Fetching events from Amplitude..."):
             if amplitude_secret:
-                events, err = fetch_amplitude_export(amplitude_api_key, amplitude_secret, days_back)
+                events, err = fetch_amplitude_export(
+                    amplitude_api_key, amplitude_secret,
+                    amplitude_project_id, days_back
+                )
             else:
-                # Fall back to events list API
-                result = fetch_amplitude_events(amplitude_api_key, "", days_back)
-                if isinstance(result, tuple):
-                    events, err = result
-                else:
-                    events, err = result, None
+                events, err = fetch_amplitude_events(
+                    amplitude_api_key, amplitude_project_id, days_back
+                )
 
             if err:
                 st.error(f"Could not fetch from Amplitude: {err}")
