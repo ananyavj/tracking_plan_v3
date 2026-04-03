@@ -1,0 +1,63 @@
+{
+  "_comment": "Default audit configuration. The Streamlit app passes this to Claude alongside the tracking plan and events.",
+
+  "mode": "sampling",
+  "sample_size": 300,
+
+  "checks_enabled": ["M0", "M1", "M2", "M3", "M4", "M5", "M6", "M7"],
+  "session_checks": true,
+
+  "sampling_strategy": {
+    "always_include": ["Order Completed"],
+    "preserve_full_sessions": true,
+    "proportional_fill": true
+  },
+
+  "severity_overrides": {},
+
+  "funnel_sequences": [
+    {
+      "name": "checkout_funnel",
+      "required_order": ["Checkout Started", "Checkout Step Completed", "Order Completed"],
+      "enforce_order": true
+    },
+    {
+      "name": "cart_funnel",
+      "required_order": ["Product Added", "Cart Viewed"],
+      "enforce_order": false
+    }
+  ],
+
+  "calculation_checks": {
+    "discount_pct": {
+      "formula":    "(compare_at_price - price) / compare_at_price * 100",
+      "tolerance":  1.0,
+      "events":     ["Product Viewed"]
+    },
+    "has_results": {
+      "formula":    "results_count > 0",
+      "tolerance":  0,
+      "events":     ["Product Searched"]
+    }
+  },
+
+  "amplitude_filters": {
+    "event_types": [
+      "Product Viewed",
+      "Product Added",
+      "Cart Viewed",
+      "Checkout Started",
+      "Checkout Step Completed",
+      "Order Completed",
+      "Product Searched",
+      "Return Requested",
+      "Product Reviewed",
+      "Wishlist Product Added"
+    ],
+    "date_range": {
+      "start": "2026-03-01",
+      "end":   "2026-04-03"
+    },
+    "limit": 300
+  }
+}

@@ -1,0 +1,13 @@
+venv/
+__pycache__/
+*.pyc
+.env
+.vscode/
+
+# Ignore massive synthetic JSON payloads to avoid bloating the repo
+simulated_events.json
+
+# Ignore dynamic logs
+mistake_log.json
+
+# Track all other templates, configs, and sample jsons
