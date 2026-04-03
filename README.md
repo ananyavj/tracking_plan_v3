@@ -1,86 +1,68 @@
-# Tracking Plan Auditor — README
+# 📊 Tracking Plan Auditor
 
-## 🎯 What This Project Does
-An autonomous analytics validation engine that cross-references live Amplitude event data against a structured tracking plan (Excel), using AI agents (Claude or Gemini) to flag instrumentation bugs categorized as M0–M6 mistakes.
-
----
-
-## 🔍 Why Claude and Gemini Report Different Numbers
-
-### The Core Truth About Session IDs
-A `session_id` IS consistent. `sess_abc123` in Amplitude always has exactly the same 5 events attached to it, no matter who queries it. That's a fixed truth in the database.
-
-So what's actually different is **NOT the events within a session** — it's **which sessions** each method happened to pull.
-
-### The Library Analogy
-Think of Amplitude's database like a library with 40,000 books (events) spread across 5,000 shelves (sessions).
-
-*   **Gemini (Current "Wide-Random" Strategy):** Walked in and grabbed a chronological slice of the first 200 books. It sampled from ~150 different shelves but only grabbed 1–2 books from each shelf. Result: **Wide but shallow.**
-*   **Claude (Targeted "High-Signal" Strategy):** Walked in and asked for "Purchase Funnel" books specifically. Because these events co-occur, it pulled from only ~50 shelves but collected the **entire story** for each. Result: **Narrow but deep.**
+**An autonomous analytics validation engine.** Organizes your tracking plan (Excel) and your actual live Amplitude data, then uses AI (Claude/Gemini) to cross-reference them and catch instrumentation bugs before they pollute your data.
 
 ---
 
-## 🛠️ Current Limitations & Architecture Discrepancies
-
-### "Single-Shot" (Gemini) vs. "Multi-Turn" (Claude)
-
-#### 1. Gemini in Streamlit (The "Single-Shot" Constraint)
-In the Streamlit app, we use the **Gemini Free Tier**, which has a strict **250k token-per-minute** limit.
-*   **The Problem:** Everything (Rules + Plan + Events) must fit into **one single prompt**. This forces a strict **200-event cap**.
-*   **The Sampling Problem:** If a session has 10 events but we are near the 200-event quota, the sampler is forced to **"behead" the session** (deleting half the events) to make it fit. 
-*   **The Result:** Gemini receives incomplete fragments. It sees the orders (M1-M3) but misses the preceding events needed to prove M4-M6 logic errors.
-
-#### 2. Claude Desktop (The "Multi-Turn" Advantage)
-Claude Desktop is a native agent that can take its time. It doesn't have an "all-or-nothing" token wall.
-*   **The Edge:** It can call tools **sequentially**. It fetches 50 orders, analyzes them, and then calls the tool again to pull the *full history* for those specific users.
-*   **The Result:** Claude sees the **complete 10-event story** for every user, giving it the evidence needed to fire M4 (Funnel Break) and M6 (User State) errors.
+## 🎯 What it Does
+*   **Automated Audits:** Validates how closely your actual Amplitude events align with your defined tracking plan.
+*   **M0–M6 Classification:** Specifically detects and reports mistake types:
+    *   **M1–M3:** Schema errors (Type mismatches, missing properties, invalid event names).
+    *   **M4–M6:** Logic errors (Funnel breaks, inconsistent product IDs across sessions, user state issues).
+*   **Dual-Path Architecture:** 
+    1.  **Claude Desktop:** Direct, local interaction via the Native Claude app using MCP (Primary).
+    2.  **Streamlit Dashboard:** Interactive web dashboard using Gemini (Fallback/Rapid Testing).
 
 ---
 
-## ⚖️ Fundamental Limitation: AI Audit is a "Spot Check"
+## 🚀 How to Run the Project
 
-Regardless of the model, we are auditing **less than 1%** of your data (e.g., 300 events out of 40,000).
+### 1. Initial Setup
+Clone the repository and enter the project folder:
+```bash
+git clone https://github.com/ananyavj/tracking_plan_v3.git
+cd tracking_plan_v3
+```
 
-1.  **What we WILL catch (Systemic Bugs):** If a price is hardcoded as a string (M1), it breaks for 100% of users. Even a tiny sample will catch this easily. **AI Accuracy: ~100%.**
-2.  **What we MIGHT catch (Common Errors):** If a specific button is missing an event, we only find it if our sample happens to include a user who clicked that button. **AI Accuracy: High but Probabilistic.**
-3.  **What we WILL miss (Rare Edge Cases):** Bugs happening only on specific device/mode combinations will likely never appear in a 300-event window. **AI Accuracy: Very Low.**
+### 2. Environment Configuration
+Create a virtual environment and install the required dependencies:
+```bash
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+```
 
-**The Goal:** Use AI to understand **Intent and Context** (e.g., *"This price is missing but that's expected because this user is on a legacy free-trial—you should update your tracking plan rules for this edge case"*), not for 100% data coverage.
+### 3. Authentication & API Keys
+Create a `.env` file in the root directory with your credentials:
+```env
+GOOGLE_API_KEY=your_gemini_key
+AMPLITUDE_API_KEY=your_amplitude_api_key
+AMPLITUDE_SECRET_KEY=your_amplitude_secret_key
+AMPLITUDE_PROJECT_ID=your_id
+```
 
----
+### 4. Running the Web App (Streamlit)
+Launch the interactive dashboard:
+```bash
+streamlit run app.py
+```
 
-## ✅ Resolved Issues
-
-*   **Fixed: API Key Security** — All keys moved to `.env` (gitignored). Dirty git history squashed and wiped.
-*   **Fixed: AI Branding** — Removed hardcoded "Claude" strings from `SKILL.md`. Gemini reports now correctly identify as `gemini-flash-latest`.
-
-## 🔴 Open Issues (Next Steps)
-
-### Issue 1: Gemini Fetches Shallowly (Logic Fix)
-*   **Problem:** `mcp_tools.py` pulls a raw chronological dump. 
-*   **Fix:** Rewrite fetch strategy to query per-event-type (mirroring Claude) to reconstruct full sessions.
-
-### Issue 2: 200-Event Hard Cap (Token Limit)
-*   **Problem:** Free Tier 250k token limit.
-*   **Fix:** Compress `SKILL.md` prompts and strip redundant JSON fields to buy more "event room."
-
-### Issue 3: Single-Call Fragility
-*   **Problem:** If Gemini's JSON is slightly malformed, the entire audit fails.
-*   **Fix:** Add retry logic and error-correction prompts in `gemini_agent.py`.
-
----
-
-## 📊 Summary Table
-
-| Issue | Cause | Token Limit? | Code Fixable? | Effort |
-| :--- | :--- | :--- | :--- | :--- |
-| **AI Audit Accuracy** | Sampling error (0.75% of data) | ✅ Yes | ❌ No | Fundamental |
-| **Session "Beheading"** | Single-shot prompt wall | ✅ Yes | ✅ Partly | Medium |
-| **Shallow session fetch**| Bulk Export API strategy | ❌ No | ✅ Yes | Medium |
-| **200-event cap** | Free tier quota | ✅ Yes | ✅ Partly | Medium |
-| **API Keys in Code** | **RESOLVED** | - | - | - |
-| **Claude Branding** | **RESOLVED** | - | - | - |
+### 5. Running via Claude Desktop (Optional)
+To use Claude Desktop natively:
+1.  Open your `claude_desktop_config.json` file.
+2.  Add both the official `@amplitude/mcp-server` and this project’s `tracking_mcp_server.py`.
+3.  *Detailed setup can be found in `claude_desktop_instructions.md`.*
 
 ---
 
-**Key takeaway:** AI helps identify the *reasoning* behind errors. The primary technical goal is to move from a **wide-random** sampling strategy to a **high-signal session** strategy to maximize what Gemini can see within its token budget.
+## 💡 Technical Notes & Limitations
+
+*   **Spot Check Logic:** This tool is designed for **Probabilistic Auditing**, not 100% database validation. It audits a high-signal 0.75% sample of your data to catch systemic bugs.
+*   **Architectural Gap:** 
+    *   **Claude:** Uses "Multi-Turn" fetching, allowing it to reconstruct deep, full sessions for logic checks (M4–M6).
+    *   **Gemini:** Currently uses a "Single-Shot" prompt limit (200 events). A **High-Signal Sampler** is being implemented to maximize the quality of these 200 events.
+*   **Security:** All API keys are stored in your local `.env`. Ensure this file remains in your `.gitignore` and is never pushed to public repositories.
+
+---
+
+**Built with ❤️ for better data quality.**
