@@ -1,11 +1,11 @@
 # Tracking Plan Auditor — README
 
-## What This Project Does
+## 🎯 What This Project Does
 An autonomous analytics validation engine that cross-references live Amplitude event data against a structured tracking plan (Excel), using AI agents (Claude or Gemini) to flag instrumentation bugs categorized as M0–M6 mistakes.
 
 ---
 
-## Why Claude and Gemini Report Different Numbers
+## 🔍 Why Claude and Gemini Report Different Numbers
 
 ### The Core Truth About Session IDs
 A `session_id` IS consistent. `sess_abc123` in Amplitude always has exactly the same 5 events attached to it, no matter who queries it. That's a fixed truth in the database.
@@ -15,82 +15,72 @@ So what's actually different is **NOT the events within a session** — it's **w
 ### The Library Analogy
 Think of Amplitude's database like a library with 40,000 books (events) spread across 5,000 shelves (sessions).
 
-**Gemini (Export API bulk pull):**
-- Walked in and grabbed the first 200 books off the shelves chronologically.
-- Happened to sample from **152 different shelves**, but only grabbed 1–2 books from each shelf.
-- Result: **Wide but shallow.** Lots of sessions, but most are incomplete.
-
-**Claude (MCP targeted queries per event type):**
-- Walked in and asked: *"Give me all Order Completed books, then all Checkout Started books, then all Product Viewed books..."*
-- These event types naturally **co-occur in the same sessions** (the checkout funnel), so Claude ended up pulling from only **49 shelves** but collected 4–5 books from each.
-- Result: **Narrow but deep.** Few sessions, but each is fully intact for funnel analysis.
-
-### Why This Matters for Issue Counts
-> Gemini saw 152 *incomplete* sessions → most sessions lacked enough events to trigger M3/M4/M6 funnel checks.
-> Claude saw 49 *complete* sessions → most sessions had the full checkout funnel visible → more funnel errors caught.
-
-**The fix:** Change how `mcp_tools.py` fetches — instead of a bulk time-range export, query **event type by event type** (like Claude does), so the sessions it returns naturally contain complete funnels.
+*   **Gemini (Current "Wide-Random" Strategy):** Walked in and grabbed a chronological slice of the first 200 books. It sampled from ~150 different shelves but only grabbed 1–2 books from each shelf. Result: **Wide but shallow.**
+*   **Claude (Targeted "High-Signal" Strategy):** Walked in and asked for "Purchase Funnel" books specifically. Because these events co-occur, it pulled from only ~50 shelves but collected the **entire story** for each. Result: **Narrow but deep.**
 
 ---
 
-## Open Issues & What's Causing Them
+## 🛠️ Current Limitations & Architecture Discrepancies
 
-### 🔴 Issue 1: Gemini Fetches Shallowly (Code/Logic Fix — NOT just token limits)
-**Root cause:** `mcp_tools.py` calls `fetch_amplitude_export()` which pulls a raw chronological dump. It has no concept of "give me events that belong to the same checkout session."
-**Impact:** M3, M4, M6 checks are under-reported because funnel events are spread across different sampled sessions.
-**Fix:** Rewrite the fetch strategy to loop per event type (like Claude's MCP does), then stitch events together by `session_id` before sampling.
-**Effort:** Medium — code-only change, no token budget needed.
+### "Single-Shot" (Gemini) vs. "Multi-Turn" (Claude)
 
----
+#### 1. Gemini in Streamlit (The "Single-Shot" Constraint)
+In the Streamlit app, we use the **Gemini Free Tier**, which has a strict **250k token-per-minute** limit.
+*   **The Problem:** Everything (Rules + Plan + Events) must fit into **one single prompt**. This forces a strict **200-event cap**.
+*   **The Sampling Problem:** If a session has 10 events but we are near the 200-event quota, the sampler is forced to **"behead" the session** (deleting half the events) to make it fit. 
+*   **The Result:** Gemini receives incomplete fragments. It sees the orders (M1-M3) but misses the preceding events needed to prove M4-M6 logic errors.
 
-### 🔴 Issue 2: 200-Event Hard Cap on Gemini Free Tier (Partly Token Limit, Partly Code)
-**Root cause:** Gemini Free Tier allows only 250,000 input tokens per minute. A single audit call including `SKILL.md` + tracking plan + events consumes ~1,200–1,500 tokens per event.
-**Impact:** Only ~180–200 events can be sent per call. This limits funnel coverage.
-**What's token-limit-only:** You cannot simply raise the number — you will hit the quota wall.
-**What IS fixable by better code:**
-- The `SKILL.md` system prompt is 31KB (~8,000 tokens) and contains code examples, pseudo-code, and verbose formatting. Compressing it to a tighter instruction-only version could save ~3,000–4,000 tokens, buying room for ~20–30 more events per call.
-- The tracking plan JSON sent to Gemini includes redundant fields (`notes`, `amplitude_map`, `example`). Stripping those before sending saves ~500–800 tokens.
-- Running **two smaller Gemini calls** (event-level checks first, then session-level checks) instead of one giant call would let each call stay under quota while covering more events total.
+#### 2. Claude Desktop (The "Multi-Turn" Advantage)
+Claude Desktop is a native agent that can take its time. It doesn't have an "all-or-nothing" token wall.
+*   **The Edge:** It can call tools **sequentially**. It fetches 50 orders, analyzes them, and then calls the tool again to pull the *full history* for those specific users.
+*   **The Result:** Claude sees the **complete 10-event story** for every user, giving it the evidence needed to fire M4 (Funnel Break) and M6 (User State) errors.
 
 ---
 
-### 🟡 Issue 3: API Keys Hardcoded in `app.py` (Security — Code Fix)
-**Root cause:** For convenience during development, Amplitude and Google API keys were put directly into the `value=` field of `st.text_input()` in `app.py`. This caused the Google key to be leaked and auto-revoked by Google's security scanner.
-**Fix:** Move all secrets to a `.env` file and load them with `python-dotenv`. The `st.text_input` default value should be empty.
-**Effort:** Low — 30 minutes of work.
+## ⚖️ Fundamental Limitation: AI Audit is a "Spot Check"
+
+Regardless of the model, we are auditing **less than 1%** of your data (e.g., 300 events out of 40,000).
+
+1.  **What we WILL catch (Systemic Bugs):** If a price is hardcoded as a string (M1), it breaks for 100% of users. Even a tiny sample will catch this easily. **AI Accuracy: ~100%.**
+2.  **What we MIGHT catch (Common Errors):** If a specific button is missing an event, we only find it if our sample happens to include a user who clicked that button. **AI Accuracy: High but Probabilistic.**
+3.  **What we WILL miss (Rare Edge Cases):** Bugs happening only on specific device/mode combinations will likely never appear in a 300-event window. **AI Accuracy: Very Low.**
+
+**The Goal:** Use AI to understand **Intent and Context** (e.g., *"This price is missing but that's expected because this user is on a legacy free-trial—you should update your tracking plan rules for this edge case"*), not for 100% data coverage.
 
 ---
 
-### 🟡 Issue 4: Gemini Hallucinates "Claude" Branding in HTML Report (Code Fix)
-**Root cause:** `SKILL.md` was originally written for Claude and its HTML template section contains hardcoded strings like `"Generated by Claude Audit Agent"` and `model: claude-sonnet-4-6` as boilerplate examples. Gemini follows the template too literally and copies them verbatim.
-**Fix:** Make those strings dynamic placeholders in `SKILL.md` (e.g., `{model_used}`) and inject the real model name before sending the prompt.
-**Effort:** Low.
+## ✅ Resolved Issues
+
+*   **Fixed: API Key Security** — All keys moved to `.env` (gitignored). Dirty git history squashed and wiped.
+*   **Fixed: AI Branding** — Removed hardcoded "Claude" strings from `SKILL.md`. Gemini reports now correctly identify as `gemini-flash-latest`.
+
+## 🔴 Open Issues (Next Steps)
+
+### Issue 1: Gemini Fetches Shallowly (Logic Fix)
+*   **Problem:** `mcp_tools.py` pulls a raw chronological dump. 
+*   **Fix:** Rewrite fetch strategy to query per-event-type (mirroring Claude) to reconstruct full sessions.
+
+### Issue 2: 200-Event Hard Cap (Token Limit)
+*   **Problem:** Free Tier 250k token limit.
+*   **Fix:** Compress `SKILL.md` prompts and strip redundant JSON fields to buy more "event room."
+
+### Issue 3: Single-Call Fragility
+*   **Problem:** If Gemini's JSON is slightly malformed, the entire audit fails.
+*   **Fix:** Add retry logic and error-correction prompts in `gemini_agent.py`.
 
 ---
 
-### 🟡 Issue 5: Single Gemini API Call Architecture (Code Fix — No Token Cost)
-**Root cause:** `gemini_agent.py` sends everything in one `chat.send_message()` call. If the response is cut short or fails mid-JSON, the entire audit fails with a `JSONDecodeError`.
-**Fix:** Add a retry wrapper with exponential backoff. If the response isn't valid JSON, re-prompt Gemini asking it to complete its output. This is pure code logic and costs zero extra tokens.
-**Effort:** Low-Medium.
-
----
-
-### 🟢 Issue 6: M3 Conservative Rule May Miss Some Planted Bugs (Logic Fix)
-**Root cause:** `SKILL.md` tells the agent: "Only flag M3 if there is exactly ONE viewed product and ONE added product with mismatched IDs." This was done to avoid false positives, but it may let some planted M3 bugs slip through if a session has 2+ `Product Viewed` events.
-**Fix:** Review the `mistake_log.json` to see which M3 bugs were planted with multi-view sessions and adjust the SKILL.md rule to allow flagging those too, with a confidence threshold.
-**Effort:** Low — SKILL.md edit only.
-
----
-
-## Summary Table
+## 📊 Summary Table
 
 | Issue | Cause | Token Limit? | Code Fixable? | Effort |
-|---|---|---|---|---|
-| Gemini shallow session fetch | Bulk Export API strategy | ❌ No | ✅ Yes | Medium |
-| 200-event cap | Free tier quota | ✅ Partly | ✅ Partly | Medium |
-| API keys in code | Dev shortcut | ❌ No | ✅ Yes | Low |
-| Claude branding in Gemini output | Hardcoded SKILL.md template | ❌ No | ✅ Yes | Low |
-| Single-call fragility | No retry logic | ❌ No | ✅ Yes | Low–Medium |
-| M3 may miss multi-view bugs | Conservative SKILL.md rule | ❌ No | ✅ Yes | Low |
+| :--- | :--- | :--- | :--- | :--- |
+| **AI Audit Accuracy** | Sampling error (0.75% of data) | ✅ Yes | ❌ No | Fundamental |
+| **Session "Beheading"** | Single-shot prompt wall | ✅ Yes | ✅ Partly | Medium |
+| **Shallow session fetch**| Bulk Export API strategy | ❌ No | ✅ Yes | Medium |
+| **200-event cap** | Free tier quota | ✅ Yes | ✅ Partly | Medium |
+| **API Keys in Code** | **RESOLVED** | - | - | - |
+| **Claude Branding** | **RESOLVED** | - | - | - |
 
-**Key takeaway:** Most issues are fixable through better code and logic. The token limit is a real constraint but only one of several factors — and even it can be partially mitigated by compressing prompts and splitting into multiple calls.
+---
+
+**Key takeaway:** AI helps identify the *reasoning* behind errors. The primary technical goal is to move from a **wide-random** sampling strategy to a **high-signal session** strategy to maximize what Gemini can see within its token budget.
