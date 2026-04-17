@@ -1,0 +1,26 @@
+[
+  {
+    "timestamp": "2026-04-17T16:27:28.303683",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": null
+  },
+  {
+    "timestamp": "2026-04-17T16:29:17.444762",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T16:30:31.305709",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  }
+]

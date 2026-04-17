@@ -57,7 +57,7 @@ def _condition_applies(condition: str, event_props: dict) -> bool:
 
 class AuditEngine:
 
-    def __init__(self, tracking_plan_path, events_data):
+    def __init__(self, tracking_plan_path, events_data, project_id=None):
         self.tracking_plan = parse_tracking_plan(tracking_plan_path)
         def _sort_key(e):
             t = e.get("time")
@@ -73,6 +73,7 @@ class AuditEngine:
         self.user_pids = {} # {user_id: {product_name: last_seen_pid}}
         
         self.summary       = {
+            "project_id":     project_id,
             "total_events":   len(self.events),
             "critical_issues": 0,
             "warning_issues":  0,
@@ -412,17 +413,25 @@ class AuditEngine:
         return sessions
 
     def _finalize_summary(self):
-        # Volume-normalised health score
-        # Correct logic: Denominator excludes M0 (unknown events) to prevent score inflation
+        # Weighted Penalty System:
+        # P0/Critical: -10 pts | P1: -5 pts | P2: -1-2 pts
+        granularity = {
+            "M0": 10, "M1": 5, "M2": 10, "M3": 5, "M4": 10,
+            "M5": 2,  "M6": 2, "M7": 2,  "M8": 1
+        }
+        
+        total_penalty = 0
+        for code, details in self.summary["by_check"].items():
+            weight = granularity.get(code, 2)
+            total_penalty += details["count"] * weight
+            
         m0_count = self.summary["by_check"]["M0"]["count"]
         denominator = max(self.summary["total_events"] - m0_count, 1)
         
-        total_issues = self.summary["critical_issues"] + self.summary["warning_issues"]
-        # Subtract m0_count from issues if it's already in the count? 
-        # No, all issues count against health. But the room for error (denominator) 
-        # is only on known events.
+        # Scale: 1 P0 in 100 events results in -1pt to health score (10/100 * 10)
+        score = max(0, 100 - (total_penalty / denominator * 10))
         
-        score = max(0, 100 - (total_issues / denominator * 100))
-        self.summary["health_score"] = round(score, 1)
-        self.summary["total_issues"] = total_issues
-        self.summary["audit_date"]   = datetime.now().isoformat()
+        self.summary["health_score"]   = round(score, 1)
+        self.summary["total_issues"]   = self.summary["critical_issues"] + self.summary["warning_issues"]
+        self.summary["total_penalty"]  = total_penalty
+        self.summary["audit_date"]     = datetime.now().isoformat()

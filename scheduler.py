@@ -1,6 +1,6 @@
 # scheduler.py
 """
-Kaliper Headless Scheduler   Phase 3
+Kaliper Headless Scheduler - Phase 3
 
 Runs a complete audit cycle with NO Streamlit dependency.
 Designed to be called by GitHub Actions (or any cron runner) daily.
@@ -21,6 +21,8 @@ Usage:
 import os
 import json
 from datetime import datetime, timedelta
+import time
+import schedule
 from dotenv import load_dotenv
 
 import mcp_tools
@@ -56,6 +58,8 @@ def run_scheduler():
         try:
             with open("simulated_events.json", "r", encoding="utf-8") as f:
                 events = json.load(f)
+            start_str = "DEMO_START"
+            end_str   = "DEMO_END"
         except FileNotFoundError:
             raise FileNotFoundError("DEMO mode failed: simulated_events.json not found. Run simulate.py first.")
     else:
@@ -82,9 +86,11 @@ def run_scheduler():
         
         events = fetch_res.get("events", [])
         print(f"  Got {len(events)} events.")
+        start_str = start_dt.strftime("%Y-%m-%d")
+        end_str   = end_dt.strftime("%Y-%m-%d")
 
     if not events:
-        print("[scheduler] No events in window   nothing to audit. Exiting cleanly.")
+        print("[scheduler] No events in window - nothing to audit. Exiting cleanly.")
         return {"status": "no_events"}
 
     #    3. Run audit engine                                                   
@@ -93,23 +99,29 @@ def run_scheduler():
         return
 
     print(f"[scheduler] Running AuditEngine on {len(events):,} events...")
-    engine  = audit_engine.AuditEngine(TRACKING_PLAN, events)
+    engine  = audit_engine.AuditEngine(TRACKING_PLAN, events, project_id=amp_project_id)
     summary, issues = engine.run_all_checks()
 
     health  = summary.get("health_score", "?")
     total_i = summary.get("total_issues", 0)
-    print(f"[scheduler] Audit complete   issues: {total_i:,} | health: {health}%")
+    print(f"[scheduler] Audit complete - issues: {total_i:,} | health: {health}%")
 
-    #    4. Save checkpoint                                                    
+    #    4. Save checkpoint and history                                        
     mcp_tools.save_audit_metadata(amp_project_id, datetime.now())
-    print(f"[scheduler] Checkpoint saved: {datetime.now().strftime('%Y-%m-%d')}")
+    mcp_tools.append_audit_history(summary)
+    print(f"[scheduler] Checkpoint and history saved: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     #    5. Evaluate alert rules                                               
     triggered = alert_engine.evaluate_alerts(summary, {}, amp_project_id)
     print(f"[scheduler] Alerts triggered: {len(triggered)}")
+    
     has_critical = False
     for r in triggered:
-        print(f"  {r.get('emoji', '⚠️')} [{r['severity']}] {r['id']}: {r['description']}")
+        msg = f"  {r.get('emoji', '⚠️')} [{r['severity']}] {r['id']}: {r['description']}"
+        try:
+            print(msg)
+        except UnicodeEncodeError:
+            print(msg.encode('ascii', 'ignore').decode('ascii'))
         if r["severity"] in ["P0", "P1"]:
             has_critical = True
 
@@ -148,6 +160,7 @@ def run_scheduler():
         {
             "slack_webhook": os.getenv("SLACK_WEBHOOK_URL"),
             "project_name":  PROJECT_NAME,
+            "ai_diagnosis":  ai_diagnosis
         }
     )
     print(f"[scheduler] Dispatch results: {dispatch_results}")
@@ -161,13 +174,35 @@ def run_scheduler():
         "window_start":   start_str,
         "window_end":     end_str,
     }
-    print(f"[scheduler] Done. {result}")
+    print(f"[scheduler] Run complete: {result['status']} | Health: {health}%")
     return result
 
 
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
+def start_production_loop():
+    """
+    Main entry point for long-running monitoring.
+    Designed to be run under a process manager like PM2 or Docker.
+    """
+    interval = int(os.getenv("AUDIT_INTERVAL_MINUTES", "1440"))
+    print(f"[scheduler] BOOT: Starting monitoring service (Interval: {interval}m)")
+    
+    # Schedule the job
+    schedule.every(interval).minutes.do(run_scheduler)
+    
+    # Run once immediately on start
+    run_scheduler()
+    
+    retry_delay = 60
+    while True:
+        try:
+            schedule.run_pending()
+            time.sleep(10)
+            retry_delay = 60 # Reset on success
+        except Exception as e:
+            print(f"[scheduler] LOOP ERROR: {e}")
+            print(f"[scheduler] Retrying in {retry_delay}s (Exponential Backoff)")
+            time.sleep(retry_delay)
+            retry_delay = min(retry_delay * 2, 900)
 
 if __name__ == "__main__":
-    run_scheduler()
+    start_production_loop()

@@ -23,6 +23,14 @@ def _event_time_ms(event: dict):
     return 0
 
 METADATA_FILE = "audit_metadata.json"
+HISTORY_FILE  = "audit_history.json"
+
+def save_atomic_json(filepath, data):
+    """Atomic write to prevent file corruption."""
+    temp_path = filepath + ".tmp"
+    with open(temp_path, "w") as f:
+        json.dump(data, f, indent=2)
+    os.replace(temp_path, filepath)
 
 def get_platform(event):
     """Fallback priority for extracting platform dimension."""
@@ -48,8 +56,35 @@ def save_audit_metadata(project_id, last_date):
         "last_audit_date": last_date.strftime("%Y-%m-%d"),
         "updated_at":      datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     }
-    with open(METADATA_FILE, "w") as f:
-        json.dump(data, f, indent=2)
+    save_atomic_json(METADATA_FILE, data)
+
+def get_audit_history():
+    if os.path.exists(HISTORY_FILE):
+        with open(HISTORY_FILE, "r") as f:
+            try: return json.load(f)
+            except: return []
+    return []
+
+def append_audit_history(summary):
+    history = get_audit_history()
+    entry = {
+        "timestamp":      datetime.now().isoformat(),
+        "health_score":   summary.get("health_score"),
+        "total_issues":   summary.get("total_issues"),
+        "critical_issues": summary.get("critical_issues"),
+        "total_events":   summary.get("total_events"),
+        "project_id":     summary.get("project_id")
+    }
+    history.append(entry)
+    # Cap at 50 to keep it lightweight
+    if len(history) > 50:
+        history = history[-50:]
+    save_atomic_json(HISTORY_FILE, history)
+
+def get_health_trend(limit=5):
+    history = get_audit_history()
+    # Return last N scores for visual trend calculation
+    return history[-limit:]
 
 def execute_get_amplitude_events(tool_params, config):
     """

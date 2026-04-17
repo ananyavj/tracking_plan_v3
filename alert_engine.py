@@ -10,6 +10,43 @@ import os
 import json
 import requests
 from datetime import datetime
+import mcp_tools
+
+def _get_trend_indicator():
+    """Returns a visual trend bar of the last 5 scores."""
+    history = mcp_tools.get_health_trend(limit=5)
+    if not history: return ""
+    
+    bar = []
+    for entry in history:
+        score = entry.get("health_score", 100)
+        if score >= 90: bar.append("🟢")
+        elif score >= 75: bar.append("🟡")
+        else: bar.append("🔴")
+    return " ".join(bar)
+
+def should_alert(summary, prev_summary):
+    """
+    Quiet Mode Logic: Only return True if:
+    - Health dropped > 2%
+    - New critical issues appeared
+    - Volume of issues increased significantly
+    """
+    if not prev_summary: return True # Always alert on first run
+    
+    curr_h = summary.get("health_score", 100)
+    prev_h = prev_summary.get("health_score", 100)
+    threshold = float(os.getenv("HEALTH_DROP_THRESHOLD", "2.0"))
+    
+    if curr_h < (prev_h - threshold): return True
+    if summary.get("critical_issues", 0) > prev_summary.get("critical_issues", 0): return True
+    
+    # Volume spike (total issues increased > 10%)
+    curr_i = summary.get("total_issues", 0)
+    prev_i = prev_summary.get("total_issues", 0)
+    if prev_i > 0 and (curr_i / prev_i) > 1.1: return True
+    
+    return False
 
 ALERT_RULES = [
     {
@@ -112,8 +149,12 @@ def evaluate_alerts(summary: dict, metadata: dict, project_id: str) -> list:
     return triggered
 
 def dispatch_alerts(triggered_rules: list, summary: dict, config: dict) -> list:
-    if not triggered_rules:
-        return []
+    history = mcp_tools.get_audit_history()
+    prev_summary = history[-2] if len(history) >= 2 else None
+    
+    # Check if we should actually post to Slack (Noise Reduction)
+    if not should_alert(summary, prev_summary) and not config.get("force"):
+        return ["Skipped: Threshold not met"]
 
     webhook     = config.get("slack_webhook") or os.getenv("SLACK_WEBHOOK_URL")
     proj_name   = config.get("project_name", "Kaliper")
@@ -123,33 +164,51 @@ def dispatch_alerts(triggered_rules: list, summary: dict, config: dict) -> list:
     health     = summary.get("health_score", "?")
     total_ev   = summary.get("total_events", "?")
     total_iss  = summary.get("total_issues", "?")
+    crit_iss   = summary.get("critical_issues", 0)
+    trend      = _get_trend_indicator()
+
+    # Trend calculation string
+    h_change = ""
+    if prev_summary:
+        diff = health - prev_summary.get("health_score", 100)
+        if diff < 0: h_change = f" (📉 {round(diff, 1)}%)"
+        elif diff > 0: h_change = f" (📈 +{round(diff, 1)}%)"
 
     lines = [
-        f"*{proj_name} Audit Alert* - {now}",
-        f"Events: {total_ev} | Issues: {total_iss} | Health: {health}%",
+        f"*{proj_name} Audit Dashboard* - {now}",
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        f"*KPIs*",
+        f"• *Health Score:* `{health}%`{h_change}",
+        f"• *Trend:* {trend}",
+        f"• *Events:* {total_ev} | *Total Issues:* {total_iss} | *Critical:* {crit_iss}",
         "",
-        "*Triggered alerts:*",
+        "*Top Issues Identified:*",
     ]
-    for rule in triggered_rules:
-        lines.append(f"{rule['label']} [{rule['severity']}] {rule['description']}")
+
+    # Group by severity for scannability
+    important_rules = sorted(triggered_rules, key=lambda x: x['severity'])[:5]
+    for rule in important_rules:
+        lines.append(f"• {rule['emoji']} [{rule['severity']}] {rule['description']}")
+
+    # AI Section (if present)
+    ai_report = config.get("ai_diagnosis")
+    if ai_report:
+        lines.append("\n*🤖 AI Context & Root Cause:*")
+        # Extract last section or first 3 lines
+        diagnosis = ai_report.split("\n\n")[-1] if "\n\n" in ai_report else ai_report
+        lines.append(f"> {diagnosis[:300].strip()}...")
 
     slack_body = {"text": "\n".join(lines)}
 
     if webhook:
         try:
             resp = requests.post(webhook, json=slack_body, timeout=8)
-            if resp.status_code == 200:
-                dispatched.append("Slack: OK")
-            else:
-                dispatched.append(f"Slack: FAILED {resp.status_code}")
-        except:
-            dispatched.append("Slack: EXCEPTION")
+            if resp.status_code == 200: dispatched.append("Slack: OK")
+            else: dispatched.append(f"Slack: FAILED {resp.status_code}")
+        except: dispatched.append("Slack: EXCEPTION")
     else:
-        # Final safety: sanitize lines before printing to Windows console
         sanitized = "\n".join(lines).encode('ascii', 'ignore').decode('ascii')
-        print("\n" + "=" * 60)
-        print(sanitized)
-        print("=" * 60 + "\n")
+        print("\n" + "=" * 60 + "\n" + sanitized + "\n" + "=" * 60 + "\n")
         dispatched.append("Console: printed")
 
     return dispatched
