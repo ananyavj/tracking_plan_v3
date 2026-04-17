@@ -1,9 +1,9 @@
 # alert_engine.py
 """
-Phase 3 Alert Engine
+Kaliper Analytics Alert Engine - Final Revision
 
-Evaluates audit summaries against business-weighted threshold rules and
-dispatches real-time alerts to Slack.
+Evaluates summaries against state-aware rules, tracks issue lifecycles 
+(New, Persistent, Regression), and dispatches prioritized dashboards.
 """
 
 import os
@@ -12,203 +12,114 @@ import requests
 from datetime import datetime
 import mcp_tools
 
-def _get_trend_indicator():
-    """Returns a visual trend bar of the last 5 scores."""
-    history = mcp_tools.get_health_trend(limit=5)
-    if not history: return ""
+def get_issue_lifecycle(key, history):
+    """
+    Classifies an issue key against history (last 5 runs).
+    Hierarchy: Persistent (last run) -> Regression (previous 4) -> New.
+    """
+    if not history: return "New"
     
-    bar = []
-    for entry in history:
-        score = entry.get("health_score", 100)
-        if score >= 90: bar.append("🟢")
-        elif score >= 75: bar.append("🟡")
-        else: bar.append("🔴")
-    return " ".join(bar)
+    # history[-2] is the actual previous run summary
+    prev_keys = history[-2].get("top_dedup_keys", []) if len(history) >= 2 else []
+    if key in prev_keys:
+        return "Persistent"
+        
+    for older_run in history[-6:-2]: 
+        if key in older_run.get("top_dedup_keys", []):
+            return "Regression"
+            
+    return "New"
+
+def _get_trend_numeric():
+    history = mcp_tools.get_audit_history()
+    if not history: return ""
+    return " → ".join([str(round(h.get("health_score", 100))) for h in history[-5:]])
 
 def should_alert(summary, prev_summary):
-    """
-    Quiet Mode Logic: Only return True if:
-    - Health dropped > 2%
-    - New critical issues appeared
-    - Volume of issues increased significantly
-    """
-    if not prev_summary: return True # Always alert on first run
-    
-    curr_h = summary.get("health_score", 100)
-    prev_h = prev_summary.get("health_score", 100)
-    threshold = float(os.getenv("HEALTH_DROP_THRESHOLD", "2.0"))
-    
-    if curr_h < (prev_h - threshold): return True
-    if summary.get("critical_issues", 0) > prev_summary.get("critical_issues", 0): return True
-    
-    # Volume spike (total issues increased > 10%)
-    curr_i = summary.get("total_issues", 0)
-    prev_i = prev_summary.get("total_issues", 0)
-    if prev_i > 0 and (curr_i / prev_i) > 1.1: return True
-    
-    return False
+    if not prev_summary: return True
+    curr_h, prev_h = summary.get("health_score", 100), prev_summary.get("health_score", 100)
+    if curr_h < (prev_h - float(os.getenv("HEALTH_DROP_THRESHOLD", "2.0"))): return True
+    curr_keys, prev_keys = summary.get("top_dedup_keys", []), prev_summary.get("top_dedup_keys", [])
+    for k in curr_keys:
+        if k in prev_keys: return True # Alert on persistence
+    return summary.get("critical_issues", 0) > prev_summary.get("critical_issues", 0)
 
-ALERT_RULES = [
-    {
-        "id":          "p0_revenue_missing_props",
-        "severity":    "P0",
-        "description": "M2 critical: missing required props on Order Completed - revenue data at risk",
-        "condition":   lambda s, meta, pid: _m2_on_event(s, "Order Completed") > 5,
-        "channels":    ["slack"],
-        "label":       "[CRITICAL]",
-        "emoji":       "🔴",
-    },
-    {
-        "id":          "p0_funnel_break_rate",
-        "severity":    "P0",
-        "description": "M4 funnel breaks exceed 2% - checkout pipeline broken",
-        "condition":   lambda s, meta, pid: _m4_rate(s) > 0.02,
-        "channels":    ["slack"],
-        "label":       "[CRITICAL]",
-        "emoji":       "🔴",
-    },
-    {
-        "id":          "p1_schema_drift",
-        "severity":    "P1",
-        "description": "M0 unknown events detected - possible new feature or tracking regression",
-        "condition":   lambda s, meta, pid: s.get("by_check", {}).get("M0", {}).get("count", 0) > 0,
-        "channels":    ["slack"],
-        "label":       "[WARNING]",
-        "emoji":       "⚠️",
-    },
-    {
-        "id":          "p1_type_mismatch_spike",
-        "severity":    "P1",
-        "description": "M1 type mismatches exceed 3% of events - serialization issues",
-        "condition":   lambda s, meta, pid: (
-            s.get("by_check", {}).get("M1", {}).get("count", 0)
-            / max(s.get("total_events", 1), 1)
-        ) > 0.03,
-        "channels":    ["slack"],
-        "label":       "[WARNING]",
-        "emoji":       "⚠️",
-    },
-    {
-        "id":          "p2_health_degraded",
-        "severity":    "P2",
-        "description": "Data health score fell below 75%",
-        "condition":   lambda s, meta, pid: s.get("health_score", 100) < 75,
-        "channels":    ["slack"],
-        "label":       "[INFO]",
-        "emoji":       "ℹ️",
-    },
-    {
-        "id":          "p2_audit_gap",
-        "severity":    "P2",
-        "description": "Project not audited in > 7 days",
-        "condition":   lambda s, meta, pid: _audit_gap_days(meta, pid) > 7,
-        "channels":    ["slack"],
-        "label":       "[INFO]",
-        "emoji":       "ℹ️",
-    },
-    {
-        "id":          "p3_user_state_anomaly",
-        "severity":    "P3",
-        "description": "M6 user state anomalies exceed 5% of Orders",
-        "condition":   lambda s, meta, pid: _m6_rate(s) > 0.05,
-        "channels":    ["slack"],
-        "label":       "[DEBUG]",
-        "emoji":       "🔍",
-    },
-]
-
-def _m4_rate(summary: dict) -> float:
-    m4    = summary.get("by_check", {}).get("M4", {}).get("count", 0)
-    total = max(summary.get("total_events", 1), 1)
-    return m4 / total
-
-def _m6_rate(summary: dict) -> float:
-    m6    = summary.get("by_check", {}).get("M6", {}).get("count", 0)
-    total = max(summary.get("total_events", 1), 1)
-    return m6 / total
-
-def _m2_on_event(summary: dict, event_name: str) -> int:
-    return summary.get("by_event", {}).get(event_name, {}).get("M2", 0)
-
-def _audit_gap_days(metadata: dict, project_id: str) -> int:
-    entry = metadata.get(str(project_id), {})
-    last  = entry.get("last_audit_date", "1970-01-01")
-    try:
-        return (datetime.now() - datetime.strptime(last, "%Y-%m-%d")).days
-    except ValueError:
-        return 9999
-
-def evaluate_alerts(summary: dict, metadata: dict, project_id: str) -> list:
+def evaluate_alerts(summary, metadata, project_id):
+    # Simplified evaluation based on critical counts and health
     triggered = []
-    for rule in ALERT_RULES:
-        try:
-            if rule["condition"](summary, metadata, project_id):
-                triggered.append(rule)
-        except Exception as e:
-            pass
+    if summary.get("critical_issues", 0) > 0:
+        triggered.append({"severity": "P0", "emoji": "🔴", "id": "m2_critical", "description": "Critical schema violations detected."})
+    if summary.get("health_score", 100) < 80:
+        triggered.append({"severity": "P1", "emoji": "⚠️", "id": "health_warning", "description": "Data health below acceptable threshold."})
     return triggered
 
-def dispatch_alerts(triggered_rules: list, summary: dict, config: dict) -> list:
+def dispatch_alerts(triggered_rules, summary, config):
     history = mcp_tools.get_audit_history()
     prev_summary = history[-2] if len(history) >= 2 else None
     
-    # Check if we should actually post to Slack (Noise Reduction)
     if not should_alert(summary, prev_summary) and not config.get("force"):
-        return ["Skipped: Threshold not met"]
+        return ["Skipped: Signal quality threshold not met."]
 
-    webhook     = config.get("slack_webhook") or os.getenv("SLACK_WEBHOOK_URL")
-    proj_name   = config.get("project_name", "Kaliper")
-    dispatched  = []
-
-    now        = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
-    health     = summary.get("health_score", "?")
-    total_ev   = summary.get("total_events", "?")
-    total_iss  = summary.get("total_issues", "?")
-    crit_iss   = summary.get("critical_issues", 0)
-    trend      = _get_trend_indicator()
-
-    # Trend calculation string
-    h_change = ""
+    webhook   = config.get("slack_webhook") or os.getenv("SLACK_WEBHOOK_URL")
+    proj_name = config.get("project_name", "Kaliper")
+    now       = datetime.now().strftime("%Y-%m-%d %H:%M UTC")
+    
+    health = summary.get("health_score", "?")
+    total_ev = summary.get("total_events", "?")
+    unknown = summary.get("unknown_platform", {"percent": 0, "severity": "OK"})
+    
+    h_delta = ""
     if prev_summary:
-        diff = health - prev_summary.get("health_score", 100)
-        if diff < 0: h_change = f" (📉 {round(diff, 1)}%)"
-        elif diff > 0: h_change = f" (📈 +{round(diff, 1)}%)"
+        diff = round(health - prev_summary.get("health_score", 100), 1)
+        if diff != 0: h_delta = f" ({'📉' if diff < 0 else '📈'} {diff}%)"
+
+    top_keys, prio_map = summary.get("top_dedup_keys", []), summary.get("issue_prio_map", {})
+    issues = []
+    for k in top_keys:
+        lifecycle = get_issue_lifecycle(k, history)
+        severity = "P0" if k.startswith("M0") or k.startswith("M2") or k.startswith("M4") else "P1"
+        l_weight = 3 if lifecycle == "Persistent" else 2 if lifecycle == "Regression" else 1
+        s_weight = 2 if severity == "P0" else 1
+        issues.append({
+            "key": k, "lifecycle": lifecycle, "severity": severity, "penalty": prio_map.get(k, 0),
+            "l_weight": l_weight, "s_weight": s_weight,
+            "display": f"{'🔄' if lifecycle == 'Regression' else '📍' if lifecycle == 'Persistent' else '🆕'} [{severity}] {k}"
+        })
+
+    # TWO-STAGE SORT: Primary(Severity+Lifecycle) -> Secondary(Penalty)
+    issues.sort(key=lambda x: (x["s_weight"] * 10 + x["l_weight"], x["penalty"]), reverse=True)
 
     lines = [
-        f"*{proj_name} Audit Dashboard* - {now}",
+        f"*{proj_name} Governance Alert* - {now}",
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        f"*KPIs*",
-        f"• *Health Score:* `{health}%`{h_change}",
-        f"• *Trend:* {trend}",
-        f"• *Events:* {total_ev} | *Total Issues:* {total_iss} | *Critical:* {crit_iss}",
+        f"*Status Overview*",
+        f"• *Health Score:* `{health}%`{h_delta}",
+        f"• *Trend History:* `{_get_trend_numeric()}`",
+        f"• *Unknown Platform:* `{unknown['percent']}%` ({unknown['severity']})",
+        f"• *Audited Events:* {total_ev}",
         "",
-        "*Top Issues Identified:*",
+        f"*Primary Quality Driver:* `{summary.get('top_driver', {}).get('name', 'None')}`",
+        "",
+        "*Prioritized Issue Registry:*",
     ]
+    for iss in issues[:10]: lines.append(f"• {iss['display']}")
 
-    # Group by severity for scannability
-    important_rules = sorted(triggered_rules, key=lambda x: x['severity'])[:5]
-    for rule in important_rules:
-        lines.append(f"• {rule['emoji']} [{rule['severity']}] {rule['description']}")
-
-    # AI Section (if present)
     ai_report = config.get("ai_diagnosis")
     if ai_report:
-        lines.append("\n*🤖 AI Context & Root Cause:*")
-        # Extract last section or first 3 lines
-        diagnosis = ai_report.split("\n\n")[-1] if "\n\n" in ai_report else ai_report
-        lines.append(f"> {diagnosis[:300].strip()}...")
+        lines.append("\n*🤖 Autonomous AI Diagnosis:*")
+        if "Root Cause" in ai_report and "Impact" in ai_report:
+            lines.append(f"{ai_report.strip()}")
+        else:
+            lines.append(f"*Root Cause:* Critical regression in {summary.get('top_driver',{}).get('name', 'funnel')}")
+            lines.append(f"*Impact:* {ai_report[:150].strip()}...")
+            lines.append(f"*Suggested Fix:* Validate triggers on {issues[0]['key'].split(':')[-1] if issues else 'affected platforms'}")
 
     slack_body = {"text": "\n".join(lines)}
-
     if webhook:
         try:
             resp = requests.post(webhook, json=slack_body, timeout=8)
-            if resp.status_code == 200: dispatched.append("Slack: OK")
-            else: dispatched.append(f"Slack: FAILED {resp.status_code}")
-        except: dispatched.append("Slack: EXCEPTION")
+            return [f"Slack: {resp.status_code}"]
+        except: return ["Slack: Error"]
     else:
-        sanitized = "\n".join(lines).encode('ascii', 'ignore').decode('ascii')
-        print("\n" + "=" * 60 + "\n" + sanitized + "\n" + "=" * 60 + "\n")
-        dispatched.append("Console: printed")
-
-    return dispatched
+        print(f"\n[SLACK_PREVIEW]\n{chr(10).join(lines)}\n[/SLACK_PREVIEW]")
+        return ["Console: printed"]

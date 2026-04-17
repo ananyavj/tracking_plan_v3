@@ -1,14 +1,6 @@
 [
   {
-    "timestamp": "2026-04-17T16:27:28.303683",
-    "health_score": 97.0,
-    "total_issues": 2344,
-    "critical_issues": 1650,
-    "total_events": 38045,
-    "project_id": null
-  },
-  {
-    "timestamp": "2026-04-17T16:29:17.444762",
+    "timestamp": "2026-04-17T17:15:40.141837",
     "health_score": 97.0,
     "total_issues": 2344,
     "critical_issues": 1650,
@@ -16,7 +8,391 @@
     "project_id": "804618"
   },
   {
-    "timestamp": "2026-04-17T16:30:31.305709",
+    "timestamp": "2026-04-17T17:16:42.077152",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:17:44.119375",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:18:46.055972",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:19:48.047041",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:20:50.123534",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:21:52.080100",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:22:53.991048",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:23:56.482635",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:24:58.499397",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:26:00.323029",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:27:02.101977",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:28:04.069543",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:29:06.067570",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:30:07.673318",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:31:09.734067",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:32:12.164791",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:33:14.091970",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:34:16.058860",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:35:18.131718",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:36:20.473171",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:37:23.044464",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:38:24.884550",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:39:26.684198",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:40:28.838332",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:41:31.522057",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:42:33.286304",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:43:35.138500",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:44:37.240705",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:45:39.562893",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:46:41.887108",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:47:43.566315",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:48:45.370716",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:49:47.813062",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:50:49.303740",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:51:51.373370",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:52:53.431898",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:53:55.778378",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:54:57.623890",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:55:59.637653",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:57:01.536591",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:58:03.848756",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T17:59:05.664377",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T18:00:07.554542",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T18:01:09.279965",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T18:02:11.386799",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T18:03:13.425758",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T18:04:15.249191",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T18:05:16.921339",
+    "health_score": 97.0,
+    "total_issues": 2344,
+    "critical_issues": 1650,
+    "total_events": 38045,
+    "project_id": "804618"
+  },
+  {
+    "timestamp": "2026-04-17T18:06:18.821005",
     "health_score": 97.0,
     "total_issues": 2344,
     "critical_issues": 1650,

@@ -5,9 +5,9 @@ from mcp.server.fastmcp import FastMCP
 from tracking_plan_parser import parse_tracking_plan
 from mcp_tools import (
     execute_run_comprehensive_audit,
-    execute_get_session_count,
     execute_query_data_distribution,
-    execute_inspect_simulated_data
+    execute_inspect_data,
+    execute_audit_amplitude_direct
 )
 from dotenv import load_dotenv
 
@@ -30,36 +30,29 @@ def get_tracking_plan(file_path: str = "tracking_plan.xlsx") -> str:
         return f"Error parsing tracking plan: {str(e)}"
 
 @mcp.tool()
-def get_audit_rules(file_path: str = "SKILL.md") -> str:
-    """Reads the SKILL.md file which contains the M1-M7 rules."""
-    actual_path = os.path.join(BASE_DIR, file_path) if not os.path.isabs(file_path) else file_path
-    try:
-        with open(actual_path, "r", encoding="utf-8") as f:
-            return f.read()
-    except Exception as e:
-        return f"Error reading rules: {str(e)}"
+def audit_amplitude_direct(days_back: int = 1) -> str:
+    """
+    REQUIRED: Performs a high-volume, production-grade audit by fetching data 
+    DIRECTLY from Amplitude. Bypasses Claude's memory limits to handle 10k-50k events.
+    Use this when you need a REAL health check on live production data.
+    """
+    result = execute_audit_amplitude_direct({"days_back": days_back}, {})
+    return json.dumps(result, indent=2)
 
 @mcp.tool()
 def run_comprehensive_audit(events: list = None) -> str:
     """
-    REQUIRED: Performs a zero-bias audit of events locally.
-    Claude: Fetch events from Amplitude first, then pass them here!
-    Returns a full summary of M0-M7 errors found across the dataset.
+    Performs a deterministic audit of a PROVIDED list of events.
+    Use this for small samples or localized debugging.
     """
     result = execute_run_comprehensive_audit({"events": events}, {})
     return json.dumps(result, indent=2)
 
 @mcp.tool()
-def get_session_count(events: list = None) -> str:
-    """Calculates total unique sessions (session_id) in the provided or default logs."""
-    result = execute_get_session_count({"events": events}, {})
-    return json.dumps(result, indent=2)
-
-@mcp.tool()
 def query_data_distribution(property_name: str, events: list = None) -> str:
     """
-    Returns a breakdown of values for a property (e.g. 'category').
-    Use this to answer specific questions like 'How many sarees are there?'.
+    Returns a breakdown of values for a specific property (e.g. 'platform').
+    Use this to audit specific property distributions or 'Unknown' gaps.
     """
     result = execute_query_data_distribution({"property_name": property_name, "events": events}, {})
     return json.dumps(result, indent=2)
@@ -67,10 +60,10 @@ def query_data_distribution(property_name: str, events: list = None) -> str:
 @mcp.tool()
 def inspect_data(events: list = None) -> str:
     """
-    REQUIRED: Returns metadata about the events (Event types, User count, Materials, Brands).
-    Call this to 'make a mental note' of what's in the data before answering deep interrogation questions.
+    Returns metadata about the events (Event types, User count, Materials, Brands).
+    Call this to get a high-level overview of the dataset before deep-diving.
     """
-    result = execute_inspect_simulated_data({"events": events}, {})
+    result = execute_inspect_data({"events": events}, {})
     return json.dumps(result, indent=2)
 
 if __name__ == "__main__":
