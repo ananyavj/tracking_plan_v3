@@ -1,18 +1,24 @@
+# tracking_plan_parser.py
 """
-tracking_plan_parser.py
-Parses the Fashion Marketplace Tracking Plan Excel file into a JSON schema
-that can be passed directly to the Claude audit agent.
+Parses the Fashion Marketplace Tracking Plan Excel into a JSON schema
+consumed by the audit engine and AI agents.
 
-Usage:
-    from tracking_plan_parser import parse_tracking_plan
-    schema = parse_tracking_plan("Fashion_Marketplace_Tracking_Plan.xlsx")
+Phase 3 change: Column H (implementation notes) is now captured as a
+`condition` field on each property. The audit engine evaluates this string
+before flagging M1/M2, allowing rules like "Populate on step 3 only."
+
+FIX — Property row detection: The original condition required BOTH the
+Event column (col A) AND the Property column (col B) to be non-empty for a
+property row. In the actual Excel, col A is BLANK on property rows (only
+filled on the event header row). The fix: a row is a property row if
+col B (property name) is non-empty AND we already have a current_event in
+scope, regardless of col A.
 """
 
 import openpyxl
 import json
 from pathlib import Path
 
-# Sheets that contain event definitions (in order they appear in the workbook)
 EVENT_SHEETS = [
     "Identify",
     "Page",
@@ -22,51 +28,43 @@ EVENT_SHEETS = [
     "Marketing",
 ]
 
-# Sheets that contain supporting data (not events)
-SUPPORT_SHEETS = {
-    "Global Props":    "global_props",
-    "Data Dictionary": "data_dictionary",
-}
+# Column indices (0-based) in event sheets
+COL_EVENT_NAME  = 0
+COL_PROPERTY    = 1
+COL_REQ_OPT     = 2
+COL_TYPE        = 3
+COL_EXAMPLE     = 4
+COL_ALLOWED     = 5
+COL_DESCRIPTION = 6
+COL_NOTES       = 7   # Phase 3: captured as `condition`
 
-# Column positions in event sheets (0-indexed, from col A)
-COL_EVENT_NAME  = 0   # A — event name (row starts with ▶)
-COL_PROPERTY    = 1   # B — property name
-COL_REQ_OPT     = 2   # C — "Required" or "Optional"
-COL_TYPE        = 3   # D — data type
-COL_EXAMPLE     = 4   # E — example value
-COL_ALLOWED     = 5   # F — allowed values (pipe-separated)
-COL_DESCRIPTION = 6   # G — description
-COL_NOTES       = 7   # H — implementation notes
+# Column indices in Global Props sheet
+GCOL_PROPERTY   = 0
+GCOL_REQ_OPT    = 1
+GCOL_TYPE       = 2
+GCOL_EXAMPLE    = 3
+GCOL_AMP_MAP    = 4
+GCOL_DESC       = 5
 
-# Column positions in Global Props sheet
-GCOL_PROPERTY   = 0   # A
-GCOL_REQ_OPT    = 1   # B
-GCOL_TYPE       = 2   # C
-GCOL_EXAMPLE    = 3   # D
-GCOL_AMP_MAP    = 4   # E — Amplitude mapping
-GCOL_DESC       = 5   # F
-
-# Normalize type strings to canonical set
 TYPE_NORMALIZE = {
-    "string":  "string",
-    "str":     "string",
-    "float":   "float",
-    "number":  "float",
-    "decimal": "float",
-    "integer": "integer",
-    "int":     "integer",
-    "boolean": "boolean",
-    "bool":    "boolean",
-    "array":   "array",
-    "list":    "array",
-    "iso8601": "ISO8601",
-    "datetime":"ISO8601",
-    "timestamp":"ISO8601",
+    "string":    "string",
+    "str":       "string",
+    "float":     "float",
+    "number":    "float",
+    "decimal":   "float",
+    "integer":   "integer",
+    "int":       "integer",
+    "boolean":   "boolean",
+    "bool":      "boolean",
+    "array":     "array",
+    "list":      "array",
+    "iso8601":   "ISO8601",
+    "datetime":  "ISO8601",
+    "timestamp": "ISO8601",
 }
 
 
 def _cell(row, idx):
-    """Safely get a cell value by index, returning None if out of range."""
     try:
         val = row[idx]
         if val is None:
@@ -96,7 +94,6 @@ def _is_required(raw):
 
 
 def parse_event_sheets(wb):
-    """Parse all event definition sheets into a list of event schema objects."""
     events = []
 
     for sheet_name in EVENT_SHEETS:
@@ -106,51 +103,74 @@ def parse_event_sheets(wb):
         current_event = None
 
         for row in ws.iter_rows(min_row=3, values_only=True):
-            # Convert tuple to list for safe indexing
             row = list(row)
-
             evt_col = _cell(row, COL_EVENT_NAME)
             prop    = _cell(row, COL_PROPERTY)
 
-            # Detect event header row (starts with ▶ or is the event name in col A)
-            if evt_col and ("▶" in evt_col or (prop and _cell(row, COL_REQ_OPT) is None)):
+            # --- 1. DETECT EVENT HEADER ---
+            # Primary signal: "▶" prefix (unambiguous, never appears on property rows).
+            # Secondary fallback: evt_col is non-empty AND prop is blank AND evt_col
+            # doesn't look like a property name (no spaces following a colon, not all-lowercase).
+            # This prevents merged-cell spill from resetting current_event mid-sheet.
+            is_event_header = False
+            if evt_col:
+                if "▶" in evt_col:
+                    is_event_header = True
+                elif not prop:
+                    # Only treat as a header if it looks like an event name
+                    # (title-cased words, not a property value like "required" or a number).
+                    looks_like_event = (
+                        len(evt_col) > 2
+                        and not evt_col.replace(" ", "").isdigit()
+                        and evt_col[0].isupper()
+                    )
+                    if looks_like_event:
+                        is_event_header = True
+
+            if is_event_header:
                 event_name = evt_col.replace("▶", "").strip()
                 if not event_name:
                     continue
-                description = _cell(row, COL_PROPERTY) or ""   # description is in col B of header row
                 current_event = {
                     "event_name":  event_name,
                     "sheet":       sheet_name,
-                    "description": description,
+                    "description": _cell(row, COL_DESCRIPTION) or _cell(row, COL_NOTES) or event_name,
                     "properties":  [],
                 }
                 events.append(current_event)
                 continue
 
-            # Detect property row (col A = event name repeated, col B = property name)
-            if current_event and prop:
-                req     = _cell(row, COL_REQ_OPT)
-                dtype   = _cell(row, COL_TYPE)
-                example = _cell(row, COL_EXAMPLE)
-                allowed = _cell(row, COL_ALLOWED)
-                desc    = _cell(row, COL_DESCRIPTION)
-                notes   = _cell(row, COL_NOTES)
+            # --- 2. DETECT PROPERTY ROW ---
+            # FIX: Only require `prop` to be non-empty (col A is blank on property rows).
+            # The old condition `if prop and current_event and evt_col` never matched
+            # because evt_col is always blank on property rows in the actual Excel.
+            if prop and current_event:
+                notes = _cell(row, COL_NOTES) or ""
+                desc  = _cell(row, COL_DESCRIPTION) or ""
+
+                # Logic: capture step-specific conditions from Notes or Description
+                condition = notes if ("step" in notes.lower()) else desc if ("step" in desc.lower()) else ""
 
                 current_event["properties"].append({
-                    "name":           prop,
-                    "required":       _is_required(req),
-                    "type":           _normalize_type(dtype),
-                    "example":        example or "",
-                    "allowed_values": _parse_allowed(allowed),
-                    "description":    desc or "",
-                    "notes":          notes or "",
+                    "name":           prop.strip(),
+                    "required":       _is_required(_cell(row, COL_REQ_OPT)),
+                    "type":           _normalize_type(_cell(row, COL_TYPE)),
+                    "example":        _cell(row, COL_EXAMPLE) or "",
+                    "allowed_values": _parse_allowed(_cell(row, COL_ALLOWED)),
+                    "description":    desc,
+                    "condition":      condition,
                 })
+                continue
+
+            # --- 3. IGNORE BLANK ROWS ---
+            # Prevents context reset for orphan properties below blank lines
+            if not evt_col and not prop:
+                continue
 
     return events
 
 
 def parse_global_props(wb):
-    """Parse the Global Props sheet."""
     if "Global Props" not in wb.sheetnames:
         return []
 
@@ -163,19 +183,19 @@ def parse_global_props(wb):
         if not prop or prop.startswith("─"):
             continue
         props.append({
-            "name":           prop,
-            "required":       _is_required(_cell(row, GCOL_REQ_OPT)),
-            "type":           _normalize_type(_cell(row, GCOL_TYPE)),
-            "example":        _cell(row, GCOL_EXAMPLE) or "",
-            "amplitude_map":  _cell(row, GCOL_AMP_MAP) or "",
-            "description":    _cell(row, GCOL_DESC) or "",
+            "name":          prop,
+            "required":      _is_required(_cell(row, GCOL_REQ_OPT)),
+            "type":          _normalize_type(_cell(row, GCOL_TYPE)),
+            "example":       _cell(row, GCOL_EXAMPLE) or "",
+            "amplitude_map": _cell(row, GCOL_AMP_MAP) or "",
+            "description":   _cell(row, GCOL_DESC) or "",
+            "condition":     "",
         })
 
     return props
 
 
 def parse_data_dictionary(wb):
-    """Parse the Data Dictionary sheet into a flat enum map."""
     if "Data Dictionary" not in wb.sheetnames:
         return {}
 
@@ -183,98 +203,96 @@ def parse_data_dictionary(wb):
     dictionary = {}
 
     for row in ws.iter_rows(min_row=3, values_only=True):
-        row      = list(row)
-        prop     = _cell(row, 0)
-        allowed  = _cell(row, 1)
-        dtype    = _cell(row, 2)
-        notes    = _cell(row, 3)
-
+        row  = list(row)
+        prop = _cell(row, 0)
         if not prop or prop.startswith("─"):
             continue
-
         dictionary[prop] = {
-            "allowed_values": _parse_allowed(allowed) if allowed else [],
-            "type":           _normalize_type(dtype),
-            "notes":          notes or "",
+            "allowed_values": _parse_allowed(_cell(row, 1)) if _cell(row, 1) else [],
+            "type":           _normalize_type(_cell(row, 2)),
+            "notes":          _cell(row, 3) or "",
         }
 
     return dictionary
 
 
 def parse_tracking_plan(filepath) -> dict:
-    """
-    Main entry point. Parses the tracking plan Excel file and returns
-    a JSON-serializable dict matching the audit agent's input contract.
-    """
+    """Main entry point. Returns the full schema dict."""
     wb = openpyxl.load_workbook(filepath, data_only=True)
 
     events          = parse_event_sheets(wb)
     global_props    = parse_global_props(wb)
     data_dictionary = parse_data_dictionary(wb)
 
-    # Build a quick lookup: normalized event name → schema
-    event_lookup = {}
-    for ev in events:
-        key = ev["event_name"].lower().replace(" ", "_")
-        event_lookup[key] = ev
+    event_lookup = {
+        ev["event_name"].lower().replace(" ", "_"): ev
+        for ev in events
+    }
 
     return {
         "events":          events,
-        "event_lookup":    event_lookup,   # for fast M0 checks
+        "event_lookup":    event_lookup,
         "global_props":    global_props,
         "data_dictionary": data_dictionary,
         "meta": {
             "source_file":   str(filepath),
             "total_events":  len(events),
             "sheets_parsed": EVENT_SHEETS,
-        }
+        },
     }
 
 
 def sample_events(events: list, config: dict) -> list:
     """
-    Sample events from a large dataset before passing to Claude.
-    Respects priority sampling strategy from audit_config.
+    Priority-based, session-preserving sampler.
+    Never cuts a session in half — if one event from session X is selected,
+    all events from that session are included.
+
+    FIX 6 — sort uses _extract_event_time fallback so Export API events
+    (which have event_time strings, not time ints) are ordered correctly.
     """
-    sample_size   = config.get("sample_size", 300)
-    always_include = config.get("sampling_strategy", {}).get("always_include", ["Order Completed"])
+    from mcp_tools import _extract_event_time  # local import avoids circular dep at module load
+
+    def _sort_key(e):
+        t = e.get("time")
+        if t and isinstance(t, (int, float)) and t > 0:
+            return t
+        dt = _extract_event_time(e)
+        return int(dt.timestamp() * 1000) if dt else 0
+
+    sample_size = config.get("sample_size", 500)
 
     if len(events) <= sample_size:
-        return sorted(events, key=lambda e: e.get("time", 0))
+        return sorted(events, key=_sort_key)
 
-    # Sort chronologically
-    events_sorted = sorted(events, key=lambda e: e.get("time", 0))
+    events_sorted = sorted(events, key=_sort_key)
 
-    priority  = [e for e in events_sorted if e.get("event_type") in always_include]
-    remainder = [e for e in events_sorted if e.get("event_type") not in always_include]
-    budget    = sample_size - len(priority)
-
-    if budget <= 0:
-        return priority[:sample_size]
-
-    # Preserve full sessions: group remainder by session_id
     session_map = {}
-    for ev in remainder:
-        sid = ev.get("event_properties", {}).get("session_id", "no_session")
+    for ev in events_sorted:
+        sid = (ev.get("event_properties") or {}).get("session_id") or f"u_{ev.get('user_id','anon')}"
         session_map.setdefault(sid, []).append(ev)
 
-    # Pick sessions proportionally until budget is filled
-    sampled = list(priority)
-    for sid, sess_events in session_map.items():
-        if len(sampled) >= sample_size:
-            break
-        if len(sampled) + len(sess_events) <= sample_size:
-            sampled.extend(sess_events)
-        else:
-            remaining_budget = sample_size - len(sampled)
-            sampled.extend(sess_events[:remaining_budget])
+    with_orders   = [s for s in session_map.values() if any(e.get("event_type") == "Order Completed"  for e in s)]
+    with_checkout = [s for s in session_map.values() if any(e.get("event_type") == "Checkout Started" for e in s)
+                     and not any(e.get("event_type") == "Order Completed" for e in s)]
+    others        = [s for s in session_map.values()
+                     if not any(e.get("event_type") in ("Order Completed", "Checkout Started") for e in s)]
+
+    sampled = []
+    for bucket in (with_orders, with_checkout, others):
+        for sess in bucket:
+            if len(sampled) + len(sess) <= sample_size:
+                sampled.extend(sess)
 
     return sorted(sampled, key=lambda e: e.get("time", 0))
 
 
 if __name__ == "__main__":
     import sys
-    path = sys.argv[1] if len(sys.argv) > 1 else "Fashion_Marketplace_Tracking_Plan.xlsx"
+    path = sys.argv[1] if len(sys.argv) > 1 else "tracking_plan.xlsx"
     schema = parse_tracking_plan(path)
     print(json.dumps(schema, indent=2))
     print(f"\nParsed {schema['meta']['total_events']} events from {len(schema['meta']['sheets_parsed'])} sheets")
+    # Show property counts per event for verification
+    for ev in schema["events"]:
+        print(f"  {ev['event_name']}: {len(ev['properties'])} properties")

@@ -1,3 +1,4 @@
+# requirements.txt
 streamlit
 requests
 openpyxl
@@ -5,3 +6,5 @@ python-dotenv
 google-generativeai
 mcp
 faker
+pandas
+plotly

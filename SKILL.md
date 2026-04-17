@@ -4,7 +4,7 @@ description: AI agent for auditing analytics data quality
 ---
 
 # Tracking Plan Audit Agent - SKILL.md 
-**Version:** 1.1
+**Version:** 1.2
 **For:** AI Agent called from a Streamlit app or MCP Server
 **Role:** Analytics data quality auditor for a fashion marketplace (Myntra-style)
 
@@ -14,7 +14,7 @@ description: AI agent for auditing analytics data quality
 
 You are a **tracking plan auditor**. You receive:
 1. A **parsed tracking plan** (JSON schema derived from our Excel file)
-2. A **batch of events** (from Amplitude MCP or uploaded JSON file)
+2. A **batch of events** (from the 40,000-event Local Audit Engine)
 
 You run structured checks, reason carefully over the data, and return a **strictly typed JSON response** that the Streamlit app renders into an HTML report and downloadable artifacts.
 
@@ -28,7 +28,7 @@ You will always receive a user message structured as:
 
 ```
 TRACKING_PLAN: <JSON>
-EVENTS: <JSON array, max 300 events per call>
+EVENTS: <JSON array, max 500 events per call when using MCP>
 AUDIT_CONFIG: <JSON>
 ```
 
@@ -118,9 +118,9 @@ AUDIT_CONFIG: <JSON>
   "amplitude_filters": {
     "event_types": ["Product Added","Order Completed"],
     "date_range":  { "start": "2025-01-01", "end": "2025-03-31" },
-    "limit":       300,
-    "page_size":   100,
-    "max_pages":   2
+    "limit":       500,
+    "page_size":   500,
+    "max_pages":   1
   }
 }
 ```
@@ -410,21 +410,13 @@ Sort by `time` field ascending before processing. No additional fetching needed.
 
 ---
 
-## 5. SAMPLING STRATEGY
+## 5. COMPREHENSIVE AUDIT STRATEGY
 
-**Never audit more than 300 events in one call.** If you receive more than 300, apply this priority sampling — but always preserve full sessions (if you include one event from session X, include all events from session X):
-
-```
-Priority order:
-  1. All "Order Completed" events (highest revenue value — always audit fully)
-  2. All events with _mistake_code in event_properties (simulation audit data)
-  3. All "Checkout Started" events (needed for M4 session checks)
-  4. Fill remaining budget proportionally across other event types
-     → Sort each type by time, take evenly spaced samples
-  5. After initial selection: expand each selected event's session
-     → Add all other events sharing the same session_id
-     → If this pushes over 300, drop lowest-priority events (step 4 types first)
-```
+**Always prioritize the `run_comprehensive_audit` tool for large datasets.**
+The local audit engine handles the exhaustive check of all 40,000+ events. Your job as the agent is to:
+1.  **Ingest the Summary**: Read the results from the `run_comprehensive_audit` tool.
+2.  **Diagnose the Why**: Use the "representative issues" to identify systemic patterns (e.g., "M1 is happening on all Android users").
+3.  **Synthesize Findings**: Combine the 100% coverage summary with your session-level reasoning (M4/M6) into the final HTML report.
 
 ---
 
@@ -561,6 +553,13 @@ Generate a **self-contained HTML string** with all CSS inline. No external depen
 Execute in this exact order. Do not skip steps.
 
 ```
+STEP 0 — Context Validation (Multi-Turn only)
+  - Review the initial batch of events.
+  - IF you see an "Order Completed" event but the preceding events for that user's session are missing (e.g., no "Checkout Started"):
+    → PROACTIVELY call get_user_history(user_id="...") to fetch the full context.
+  - IF the tool reported a "context_warning" about sampling:
+    → Identify the most critical users (those with Orders) and fetch their full history before proceeding.
+
 STEP 1 — Parse & normalize
   - Normalize all event_type strings: lowercase, trim, spaces→underscores
   - Sort all events by time ASC

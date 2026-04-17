@@ -30,9 +30,12 @@ Replace your configuration file contents with the following JSON block. This poi
 1. **Restart Claude Desktop completely** (quit from system tray).
 2. When you start your next chat and ask it to use Amplitude, Claude might prompt you to log in to Amplitude via an OAuth popup or Settings panel. Complete this to grant Claude secure access to your Amplitude projects.
 
-## Step 4: Run the Final Audit!
-In any Claude Desktop chat, simply copy and paste this exact prompt:
+## Step 4: Run a "Deep Audit" (Hybrid Mode)
+In any Claude Desktop chat, copy and paste this prompt to perform a high-performance audit on live production data:
 
-> **"Use your tools to get the tracking plan and my audit rules. Then use your Amplitude connector to pull the latest 300 events for my project, and run a full audit comparing the events to the tracking plan according to the rules."**
+> **"Use your Amplitude connector to pull the latest 500 events for my project. Then, pass those events to your run_comprehensive_audit tool. Finally, analyze the results and give me a strategic diagnostic report."**
 
-Claude will autonomously wake up `tracking_mcp_server.py` to read your Excel file, fetch your live Amplitude data, and report the errors right in your chat!
+Claude will autonomously:
+1.  **Fetch** live data from Amplitude.
+2.  **Pipe** that data into your local Python `AuditEngine`.
+3.  **Diagnose** the results intelligently using the summarized clusters.

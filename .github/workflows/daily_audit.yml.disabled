@@ -1,0 +1,37 @@
+# ⚠️ DISABLED: Currently in testing phase. 
+# Re-enable by removing the '.disabled' extension from the filename 
+# and updating GitHub Secrets with new Amplitude/Google keys after re-simulation.
+name: Kaliper Daily Audit
+
+on:
+  schedule:
+    - cron: '0 9 * * *' # 9 AM UTC Daily
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas openpyxl requests google-generativeai python-dotenv faker
+
+      - name: Run Kaliper Auditor
+        env:
+          AMPLITUDE_API_KEY: ${{ secrets.AMPLITUDE_API_KEY }}
+          AMPLITUDE_SECRET_KEY: ${{ secrets.AMPLITUDE_SECRET_KEY }}
+          AMPLITUDE_PROJECT_ID: ${{ secrets.AMPLITUDE_PROJECT_ID }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          MODE: live
+          TRACKING_PLAN_PATH: tracking_plan.xlsx
+        run: python scheduler.py
