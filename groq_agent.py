@@ -310,7 +310,20 @@ def run_groq_audit_agent(
                         "content": json.dumps(result),
                     })
                 
-                continue # Go to next iteration to get the response after tool calls
+                # After processing all tool results, inject a forcing message
+                # so the model knows to stop calling tools and write the report
+                messages.append({
+                    "role": "user",
+                    "content": (
+                        "You have gathered enough evidence from the tools. "
+                        "Now return ONLY valid JSON (no markdown fences) with these exact keys: "
+                        "summary (string), recommendations (list, each with title+detail+code_fix), "
+                        "tracking_plan_gaps (list, each with event_name+verdict+reason). "
+                        "Include at least 3 concrete recommendations based on the issues found."
+                    )
+                })
+                continue  # Go to next iteration to get the final JSON response
+
 
             else:
                 # No more tool calls, parse final response

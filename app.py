@@ -493,7 +493,8 @@ if _audit_triggered:
                                 "project_name":  f"Kaliper [{amp_project_id or 'LOCAL'}]",
                             })
                     except: pass
-                    st.toast("Audit complete!")
+                    st.toast("Audit complete! AI Diagnosis is now ready.")
+                    st.rerun()
             except Exception as e:
                 st.error(f"System Failure: {str(e)}")
 
