@@ -156,7 +156,29 @@ def execute_run_comprehensive_audit(tool_params, config):
     t_plan = os.getenv("TRACKING_PLAN_PATH", "tracking_plan.xlsx")
     engine = AuditEngine(t_plan, events)
     summary, issues = engine.run_all_checks()
-    return {"status": "success", "summary": summary, "issue_count": len(issues)}
+    
+    # Cluster findings for the AI agent
+    clusters = {}
+    for issue in issues:
+        dk = issue.get("dedup_key")
+        if dk not in clusters:
+            clusters[dk] = {
+                "dedup_key": dk,
+                "code": issue.get("code"),
+                "event": issue.get("event"),
+                "property": issue.get("property"),
+                "platform": issue.get("platform"),
+                "count": 0,
+                "example_issue": issue.get("issue")
+            }
+        clusters[dk]["count"] += 1
+
+    return {
+        "status": "success", 
+        "summary": summary, 
+        "issue_count": len(issues),
+        "clustered_findings": list(clusters.values())
+    }
 
 def execute_audit_amplitude_direct(tool_params, config):
     """
@@ -180,11 +202,28 @@ def execute_audit_amplitude_direct(tool_params, config):
     # Save to history for trend tracking
     append_audit_history(summary)
     
+    # Cluster findings for the AI agent
+    clusters = {}
+    for issue in issues:
+        dk = issue.get("dedup_key")
+        if dk not in clusters:
+            clusters[dk] = {
+                "dedup_key": dk,
+                "code": issue.get("code"),
+                "event": issue.get("event"),
+                "property": issue.get("property"),
+                "platform": issue.get("platform"),
+                "count": 0,
+                "example_issue": issue.get("issue")
+            }
+        clusters[dk]["count"] += 1
+
     return {
         "status": "success",
         "events_audited": len(events),
         "summary": summary,
-        "issue_count": len(issues)
+        "issue_count": len(issues),
+        "clustered_findings": list(clusters.values())
     }
 
 def get_amplitude_events(days_back=3, start=None, end=None, **config):

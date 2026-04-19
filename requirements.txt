@@ -9,3 +9,4 @@ faker
 pandas
 plotly
 schedule
+groq

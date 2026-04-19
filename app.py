@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, date
 from dotenv import load_dotenv
 
 load_dotenv(os.path.join(os.path.dirname(__file__), '.env'), override=True)
-from gemini_agent import run_gemini_audit_agent
+from groq_agent import run_groq_audit_agent
 from audit_engine import AuditEngine
 from utils import _extract_event_time, parse_amplitude_time
 import mcp_tools
@@ -58,7 +58,7 @@ metadata = mcp_tools.load_audit_metadata()
 # Version sentinel — bump this string any time session_state keys or message
 # formats change. On first run after a code change, old cached values are wiped
 # cleanly instead of showing stale text from the previous version.
-_STATE_VERSION = "v7"
+_STATE_VERSION = "v8"
 if st.session_state.get("_state_version") != _STATE_VERSION:
     for _k in ["recency_msg", "snap_msg", "events_list", "audit_summary",
                "audit_issues", "alerts", "ai_analysis", "tracking_plan_gaps",
@@ -102,18 +102,14 @@ with st.sidebar:
         use_defaults = False
 
     st.markdown("---")
-    google_key = st.text_input("Gemini API Key", type="password", value=os.getenv("GOOGLE_API_KEY", ""))
+    groq_key = st.text_input("Groq API Key", type="password", value=os.getenv("GROQ_API_KEY", ""))
 
-    # FIX 2 — Vertex AI key detection: surface a clear setup guide instead of
-    # letting the AQ. key silently crash inside gemini_agent.py.
-    if google_key and google_key.startswith("AQ."):
+    # Groq setup guide
+    if groq_key == "gsk_your_free_key_here":
         st.warning(
-            "⚠️ **Vertex AI key detected** (`AQ.` prefix).\n\n"
-            "This app uses the `google-generativeai` library which requires an "
-            "**AI Studio key** (starts with `AIza`). Vertex AI keys use a different "
-            "auth flow and will cause an 'Invalid API Key' error.\n\n"
-            "**To fix:** Visit [aistudio.google.com](https://aistudio.google.com) "
-            "→ Get API Key → paste the `AIza...` key here."
+            "⚠️ **Default Groq Key detected**.\n\n"
+            "Please visit [console.groq.com](https://console.groq.com) "
+            "to get your own free API key and paste it here or update your .env file."
         )
 
     amp_api_key    = os.getenv("AMPLITUDE_API_KEY", "")
@@ -146,7 +142,7 @@ with st.sidebar:
 
     st.markdown("---")
     st.subheader("AI Strategy")
-    force_pro = st.toggle("High-Precision Mode", help="Use Gemini 2.0 Pro for deeper reasoning. Slower and higher cost.")
+    force_pro = st.toggle("High-Precision Mode", help="Use Llama 3 70B for deeper reasoning. Slower but more accurate.")
     if force_pro:
         st.caption("ℹ️ Uses advanced reasoning for complex cross-device diagnostics.")
 
@@ -308,46 +304,62 @@ with col1:
     run_btn = st.button("Run Full Volume Audit", use_container_width=True)
 with col2:
     st.subheader("Strategic Insight")
-    ai_btn = st.button("Diagnose with AI", disabled=not st.session_state.audit_summary, use_container_width=True)
+    _ai_ready = bool(st.session_state.audit_summary)
+    ai_btn = st.button("Diagnose with AI", disabled=not _ai_ready, use_container_width=True)
+    if not _ai_ready:
+        st.caption("Run an audit first to enable.")
 
 if ai_btn:
-    # FIX 2 cont. — Block AI run immediately if a Vertex key is detected.
-    # Prevents a silent crash deep inside gemini_agent.py.
-    if google_key and google_key.startswith("AQ."):
-        st.error(
-            "Cannot run AI Diagnostician: Vertex AI key detected. "
-            "Please provide an AI Studio key (AIza...) instead. "
-            "See the sidebar for setup instructions."
-        )
-        st.stop()
-
-    if not google_key:
-        st.error("Please provide a Gemini API Key in the sidebar.")
-    elif st.session_state.events_list is None:
-        st.error("No events found in memory. Please run an audit first.")
+    if not groq_key or groq_key == "gsk_your_free_key_here":
+        st.error("Please provide a Groq API Key in the sidebar.")
+    elif not st.session_state.audit_summary:
+        st.error("No audit results found. Please run a Full Volume Audit first.")
     else:
-        with st.spinner("Gemini Diagnostician at work..."):
+        # Use cached events if available, otherwise empty list (agent will use audit issues)
+        _events_for_agent = st.session_state.events_list or []
+        
+        print("[app] AI Diagnosis triggered...")
+        with st.spinner("Groq Llama3 Diagnostician at work..."):
             try:
-                # FIX: Pass tp_path so uploaded tracking plans are used, not just tracking_plan.xlsx
-                findings = mcp_tools.execute_run_comprehensive_audit(
-                    {"events": st.session_state.events_list, "tracking_plan_path": tp_path},
-                    {"api_key": amp_api_key, "secret_key": amp_secret_key}
-                )
+                # Build clustered findings from stored audit issues
+                _clusters = {}
+                for _issue in (st.session_state.audit_issues or []):
+                    _dk = _issue.get("dedup_key")
+                    if _dk not in _clusters:
+                        _clusters[_dk] = {
+                            "dedup_key": _dk,
+                            "code": _issue.get("code"),
+                            "event": _issue.get("event"),
+                            "property": _issue.get("property"),
+                            "platform": _issue.get("platform"),
+                            "count": 0,
+                            "example_issue": _issue.get("issue")
+                        }
+                    _clusters[_dk]["count"] += 1
 
-                if "error" in findings:
-                    st.error(f"Clustering Failed: {findings['error']}")
+                findings = {
+                    "status": "success",
+                    "summary": st.session_state.audit_summary,
+                    "issue_count": len(st.session_state.audit_issues or []),
+                    "clustered_findings": list(_clusters.values())
+                }
+
+                if not findings["clustered_findings"]:
+                    st.info("No issues found in your data — your tracking plan looks clean! Nothing to diagnose.")
                 else:
+                    print(f"[app] Clustering successful. {len(findings['clustered_findings'])} clusters. Starting agent...")
                     with open("SKILL.md", "r") as f:
                         system_prompt = f.read()
 
-                    temp_engine = AuditEngine(tp_path, st.session_state.events_list)
+                    temp_engine = AuditEngine(tp_path, _events_for_agent) if _events_for_agent else None
+                    _tp = temp_engine.tracking_plan if temp_engine else {}
 
-                    agent = run_gemini_audit_agent(
-                        google_api_key=google_key,
+                    agent = run_groq_audit_agent(
+                        groq_api_key=groq_key,
                         system_prompt=system_prompt,
-                        tracking_plan=temp_engine.tracking_plan,
+                        tracking_plan=_tp,
                         clustered_findings=findings,
-                        events=st.session_state.events_list,
+                        events=_events_for_agent,
                         app_config={
                             "api_key": amp_api_key,
                             "secret_key": amp_secret_key,
