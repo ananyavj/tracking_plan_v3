@@ -12,3 +12,8 @@ simulated_events.json
 mistake_log.json
 
 # Track all other templates, configs, and sample jsons
+# Runtime audit data - updated on every audit run, not source code
+audit_history.json
+audit_metadata.json
+audit_output.json
+temp_tp.xlsx
