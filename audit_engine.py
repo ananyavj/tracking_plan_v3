@@ -167,12 +167,62 @@ class AuditEngine:
         return True
 
     def _check_m3_m7(self):
+        # --- M7: Duplicate insert_id detection ---
         seen_ids = {}
         for ev in self.events:
             iid = ev.get("insert_id")
             if iid:
                 if iid in seen_ids: self._add_issue("M7", "warning", ev, f"Duplicate insert_id: {iid}")
                 else: seen_ids[iid] = ev.get("event_type")
+
+        # --- M3: Inconsistent product_id mid-funnel ---
+        # Groups events by session, then checks that product_id on Product Added
+        # matches the product_id seen on the most recent Product Viewed in that session.
+        sessions = {}
+        for ev in self.events:
+            sid = (ev.get("event_properties") or {}).get("session_id")
+            if sid:
+                sessions.setdefault(sid, []).append(ev)
+
+        for sid, evs in sessions.items():
+            # Track the last seen product_id per product on Product Viewed
+            last_viewed_pid = {}  # product position key -> product_id seen on PDP
+            for ev in evs:
+                etype = ev.get("event_type", "")
+                props = ev.get("event_properties") or {}
+                pid   = props.get("product_id")
+                if not pid:
+                    continue
+                if etype == "Product Viewed":
+                    # Use product_id itself as anchor key (last viewed wins)
+                    last_viewed_pid[pid] = pid
+                elif etype == "Product Added":
+                    # Check if ANY viewed product_id is a close match but differs
+                    # A mismatch means the product_id changed between PDP and cart
+                    cart_pid = pid
+                    # Normalize comparison: lowercase, strip spaces
+                    norm_cart = cart_pid.lower().replace(" ", "")
+                    matched_view = False
+                    for viewed_pid in last_viewed_pid:
+                        if viewed_pid.lower().replace(" ", "") == norm_cart:
+                            matched_view = True
+                            break
+                    # If there were viewed products but none match cart product_id
+                    if last_viewed_pid and not matched_view:
+                        # Only flag if the cart pid looks like a variant of a viewed pid
+                        # (avoid flagging genuinely new items added without a PDP view)
+                        for viewed_pid in last_viewed_pid:
+                            v_base = viewed_pid[:6].lower()  # first 6 chars as SKU prefix
+                            c_base = cart_pid[:6].lower()
+                            if v_base == c_base:  # same SKU root = confirmed mid-funnel change
+                                self._add_issue(
+                                    "M3", "critical", ev,
+                                    f"product_id changed mid-funnel: PDP had '{viewed_pid}', cart has '{cart_pid}'",
+                                    property="product_id",
+                                    found_value=cart_pid,
+                                    expected=viewed_pid
+                                )
+                                break
 
     def _check_m4_m6(self):
         sessions = {}

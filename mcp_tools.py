@@ -77,6 +77,7 @@ def execute_get_amplitude_events(tool_params, config):
     secret_key = config.get("secret_key") or os.getenv("AMPLITUDE_SECRET_KEY")
     start_str  = tool_params.get("start")
     end_str    = tool_params.get("end")
+    limit      = tool_params.get("limit")  # Optional: stop once this many events are fetched
     if not (start_str and end_str):
         db = tool_params.get("days_back", 3)
         e_t, s_t = datetime.utcnow(), datetime.utcnow() - timedelta(days=db)
@@ -85,11 +86,17 @@ def execute_get_amplitude_events(tool_params, config):
     all_events = []
     try:
         dt_s, dt_e = datetime.strptime(start_str, "%Y%m%dT%H"), datetime.strptime(end_str, "%Y%m%dT%H")
+        # Build chunks in REVERSE order (newest first) so health checks find recent events fast
+        chunks = []
         curr = dt_s
         while curr < dt_e:
             chunk_e = min(curr + timedelta(hours=24), dt_e)
-            url = f"https://amplitude.com/api/2/export?start={curr.strftime('%Y%m%dT%H')}&end={chunk_e.strftime('%Y%m%dT%H')}"
-            resp = requests.get(url, auth=HTTPBasicAuth(api_key, secret_key), stream=True, timeout=(10, 120))
+            chunks.append((curr, chunk_e))
+            curr = chunk_e
+        chunks = list(reversed(chunks))
+        for chunk_s, chunk_e in chunks:
+            url = f"https://amplitude.com/api/2/export?start={chunk_s.strftime('%Y%m%dT%H')}&end={chunk_e.strftime('%Y%m%dT%H')}"
+            resp = requests.get(url, auth=HTTPBasicAuth(api_key, secret_key), stream=True, timeout=(10, 180))
             if resp.status_code == 200:
                 with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
                     for fn in z.namelist():
@@ -102,7 +109,9 @@ def execute_get_amplitude_events(tool_params, config):
                                             dt = _extract_event_time(ev)
                                             if dt: ev['time'] = int(dt.timestamp() * 1000)
                                         all_events.append(ev)
-            curr = chunk_e
+            # Stop early if a limit was specified and we have enough events
+            if limit and len(all_events) >= limit:
+                break
     except Exception as e: return {"error": str(e)}
     return {"status": "success", "events": all_events}
 
@@ -153,7 +162,14 @@ def execute_run_comprehensive_audit(tool_params, config):
             with open("simulated_events.json", "r") as f: events = json.load(f)
         except: return {"error": "No data provided for audit."}
     
-    t_plan = os.getenv("TRACKING_PLAN_PATH", "tracking_plan.xlsx")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    t_plan = os.getenv("TRACKING_PLAN_PATH")
+    if not t_plan:
+        t_plan = os.path.join(base_dir, "tracking_plan.xlsx")
+    
+    if not os.path.exists(t_plan):
+        return {"error": f"Tracking plan not found at {t_plan}. Please check TRACKING_PLAN_PATH in .env"}
+
     engine = AuditEngine(t_plan, events)
     summary, issues = engine.run_all_checks()
     
@@ -195,7 +211,14 @@ def execute_audit_amplitude_direct(tool_params, config):
     if not events: return {"error": "No events found in Amplitude for the specified window."}
     
     print(f"[mcp] Fetched {len(events)} events. Starting audit...")
-    t_plan = os.getenv("TRACKING_PLAN_PATH", "tracking_plan.xlsx")
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    t_plan = os.getenv("TRACKING_PLAN_PATH")
+    if not t_plan:
+        t_plan = os.path.join(base_dir, "tracking_plan.xlsx")
+    
+    if not os.path.exists(t_plan):
+        return {"error": f"Tracking plan not found at {t_plan}. Please check TRACKING_PLAN_PATH in .env"}
+
     engine = AuditEngine(t_plan, events)
     summary, issues = engine.run_all_checks()
     
@@ -226,8 +249,8 @@ def execute_audit_amplitude_direct(tool_params, config):
         "clustered_findings": list(clusters.values())
     }
 
-def get_amplitude_events(days_back=3, start=None, end=None, **config):
-    return execute_get_amplitude_events({"days_back": days_back, "start": start, "end": end}, config)
+def get_amplitude_events(days_back=3, start=None, end=None, limit=None, **config):
+    return execute_get_amplitude_events({"days_back": days_back, "start": start, "end": end, "limit": limit}, config)
 
 def get_user_history(user_id=None, **config):
     return execute_get_user_history({"user_id": user_id}, config)

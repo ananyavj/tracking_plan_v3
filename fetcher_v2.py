@@ -107,7 +107,7 @@ class FetcherV2:
                 "timestamp":  t,
                 "user_id":    e.get("user_id"),
                 "session_id": (e.get("event_properties") or {}).get("session_id") or e.get("session_id"),
-                "platform":   e.get("platform") or "unknown",
+                "platform":   e.get("platform") or (e.get("event_properties") or {}).get("platform") or "unknown",
                 "properties": e.get("event_properties") or e.get("properties") or {},
                 "insert_id":  e.get("insert_id"),
                 "raw":        e # Keep link to raw event for debugging

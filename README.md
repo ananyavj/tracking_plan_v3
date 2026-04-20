@@ -11,9 +11,9 @@
 3. [The Deterministic Audit Engine](#3-the-deterministic-audit-engine)
 4. [The Stateful Alert System](#4-the-stateful-alert-system)
 5. [The AI Diagnostician (Groq + Llama 3.3)](#5-the-ai-diagnostician-groq--llama-33)
-6. [Interface Layer 1 — Streamlit Dashboard (app.py)](#6-interface-layer-1--streamlit-dashboard-apppy)
-7. [Interface Layer 2 — V2 Governance Dashboard (app_v2.py)](#7-interface-layer-2--v2-governance-dashboard-app_v2py)
-8. [Interface Layer 3 — Claude Desktop MCP Integration](#8-interface-layer-3--claude-desktop-mcp-integration)
+6. [Interface Layer 1 — Live Debugger (app.py / V1)](#interface-layer-1--live-debugger-apppy--v1)
+7. [Interface Layer 2 — Governance Dashboard (app_v2.py / V2)](#interface-layer-2--governance-dashboard-app_v2py--v2)
+8. [Interface Layer 3 — Claude Desktop MCP Integration](#interface-layer-3--claude-desktop-mcp-integration)
 9. [The V2 Deterministic Pipeline](#9-the-v2-deterministic-pipeline)
 10. [Mathematical Foundations](#10-mathematical-foundations)
 11. [Project File Reference](#11-project-file-reference)
@@ -62,7 +62,7 @@ Kaliper operates on a **"Governed Hybrid"** architecture that strictly separates
          ▼
 ┌─────────────────────────────────────────────────────────────┐
 │                   INTERFACE LAYERS                          │
-│  app.py (Streamlit V1)  ·  app_v2.py (Streamlit V2)        │
+│  app.py (V1 Microscope)  ·  app_v2.py (V2 Satellite)        │
 │  tracking_mcp_server.py (Claude Desktop MCP)               │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -481,3 +481,36 @@ Add to your `claude_desktop_config.json`:
 ---
 
 > Built for analytics engineering teams who treat their data pipeline with the same rigor as their source code.
+
+---
+
+## 13. Pipeline Comparison: V1 vs. V2
+
+Kaliper provides two distinct operational modes to handle different stages of the analytics lifecycle.
+
+### Interface Layer 1: The "Microscope" (app.py / V1)
+**Best for:** Developers and QA Engineers.
+*   **Mode:** Live, Exploratory, Ad-hoc.
+*   **Behavior:** Fetches a small-to-medium batch of events directly from Amplitude or local JSON on demand.
+*   **State:** Stateless. Every refresh is a clean slate. It does not remember yesterday's bugs.
+*   **AI Goal:** "Forensic Analysis"—deep diving into a specific session or event to find out exactly what went wrong.
+
+### Interface Layer 2: The "Satellite" (app_v2.py / V2)
+**Best for:** Analytics Managers and Executives.
+*   **Mode:** Background, Stateful, Governance.
+*   **Behavior:** Runs headlessly via `scheduler_v2.py`. It processes tens of thousands of events and persists the results to `audit_output.json`.
+*   **State:** **State-Aware.** It compares today's run against `audit_history.json` to categorize issues:
+    *   🔴 **New**: A bug that just appeared for the first time.
+    *   🟡 **Persistent**: A bug we already know about that hasn't been fixed yet.
+    *   🔵 **Regression**: A bug we once fixed that has mysteriously returned.
+*   **AI Goal:** "Strategic Remediation"—high-level summaries of health trends and systemic risks across the entire organization.
+
+---
+
+## 14. Troubleshooting & Maintenance
+
+### Common Issues
+*   **Unknown Platform 100%**: This occurs if the `fetcher_v2.py` fails to extract the platform dimension. Ensure that your events contain a `platform` key either at the top level or nested inside `event_properties`. (Note: A fix was applied on April 20th to handle nested Amplitude properties automatically).
+*   **Zero Event Audits**: Usually caused by a pathing error in the MCP server. Always use absolute paths for the `TRACKING_PLAN_PATH` in your `.env` file.
+
+---

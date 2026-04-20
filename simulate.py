@@ -47,8 +47,14 @@ if not AMPLITUDE_API_KEY:
 
 SEND_TO_AMPLITUDE = True
 
-SIM_START   = datetime(2026, 3, 1)
-SIM_END     = datetime(2026, 4, 1)
+# Dynamic window: always ends today (midnight), starts 30 days prior.
+# This ensures event timestamps align with Amplitude ingestion time,
+# preventing the semantic mismatch where Amplitude counts events by
+# when they arrived (this month) but event `time` fields point to a
+# past month — causing "Events This Month" vs dashboard filter gaps.
+_today      = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+SIM_END     = _today                          # today midnight UTC (exclusive)
+SIM_START   = SIM_END - timedelta(days=30)    # 30-day rolling window
 NUM_USERS   = 500
 BATCH_SIZE  = 200       # Optimized for stability based on user feedback
 OUTPUT_FILE = "simulated_events.json"
@@ -841,7 +847,11 @@ def run_simulation():
     users       = make_users(NUM_USERS)
     all_events  = []
     mistake_log = []
-    total_days  = (SIM_END - SIM_START).days + 1
+    # Use .days without +1: SIM_END is exclusive (today midnight).
+    # Adding 1 previously caused events to be generated on the boundary
+    # date (SIM_END itself), contributing to the ~400 event gap when
+    # filtering by [SIM_START, SIM_END) in the dashboard.
+    total_days  = (SIM_END - SIM_START).days
 
     for day_offset in range(total_days):
         current_date = SIM_START + timedelta(days=day_offset)
