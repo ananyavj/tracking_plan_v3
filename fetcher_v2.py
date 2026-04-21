@@ -48,8 +48,11 @@ class FetcherV2:
         if not (api_key and secret_key):
             raise ValueError("Missing Amplitude API/Secret keys in config or environment.")
 
-        # Default window: last N days
-        end_t = datetime.utcnow()
+        # Default window: last N days.
+        # BUG FIX: Amplitude Export API does not serve the current incomplete hour.
+        # Clamp end to the last fully completed UTC hour to avoid silent 404s.
+        now_utc = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        end_t   = now_utc - timedelta(hours=1)
         start_t = end_t - timedelta(days=days_back)
         start_str = start_t.strftime("%Y%m%dT%H")
         end_str = end_t.strftime("%Y%m%dT%H")
@@ -62,26 +65,38 @@ class FetcherV2:
             chunk_e = min(curr + timedelta(hours=24), end_t)
             url = f"https://amplitude.com/api/2/export?start={curr.strftime('%Y%m%dT%H')}&end={chunk_e.strftime('%Y%m%dT%H')}"
             
-            resp = requests.get(
-                url, 
-                auth=HTTPBasicAuth(api_key, secret_key), 
-                stream=True, 
-                timeout=(10, 120)
-            )
+            try:
+                resp = requests.get(
+                    url,
+                    auth=HTTPBasicAuth(api_key, secret_key),
+                    stream=True,
+                    timeout=(10, 60)
+                )
+            except requests.exceptions.Timeout:
+                print(f"[fetcher_v2] Timeout on chunk {curr.strftime('%Y%m%dT%H')} — skipping")
+                curr = chunk_e
+                continue
+            except requests.exceptions.ConnectionError as ce:
+                raise ConnectionError(f"Cannot reach Amplitude: {ce}")
             
+            if chunk_e <= curr:
+                break  # BUG FIX: guard against zero-width chunks / infinite loop
             if resp.status_code == 200:
-                with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
-                    for fn in z.namelist():
-                        if fn.endswith(".json.gz"):
-                            with z.open(fn) as f:
-                                decompression = zlib.decompress(f.read(), 16+zlib.MAX_WBITS)
-                                for line in decompression.decode('utf-8').splitlines():
-                                    if line.strip():
-                                        all_events.append(json.loads(line))
+                try:
+                    with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                        for fn in z.namelist():
+                            if fn.endswith(".json.gz"):
+                                with z.open(fn) as f:
+                                    decompression = zlib.decompress(f.read(), 16+zlib.MAX_WBITS)
+                                    for line in decompression.decode('utf-8').splitlines():
+                                        if line.strip():
+                                            all_events.append(json.loads(line))
+                except zipfile.BadZipFile:
+                    pass  # Amplitude can return non-zip body for empty ranges
             elif resp.status_code == 404:
-                print(f"[fetcher_v2] No data found for chunk {curr.strftime('%Y%m%dT%H')}")
+                print(f"[fetcher_v2] No data for chunk {curr.strftime('%Y%m%dT%H')} (404 — normal gap)")
             else:
-                print(f"[fetcher_v2] API Error {resp.status_code}: {resp.text}")
+                print(f"[fetcher_v2] API Error {resp.status_code}: {resp.text[:200]}")
             
             curr = chunk_e
 

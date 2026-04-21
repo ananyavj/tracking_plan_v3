@@ -31,17 +31,10 @@ HINT_MAP = {
 
 def summarize_tracking_plan(tp):
     summary = []
-    # Support both list format and dict/lookup format
-    events_source = tp.get("events", [])
-    if not events_source and "event_lookup" in tp:
-        # Convert lookup dict to list for the summarizer
-        events_source = list(tp["event_lookup"].values())
-
-    for ev in events_source:
-        ename = ev.get("event_name", "Unknown")
-        props_list = []
+    for ev in tp.get("events", []):
+        ename = ev["event_name"]
         for p in ev.get("properties", []):
-            pname = p.get("name", "unknown")
+            pname = p["name"]
             ptype = p.get("type", "any")
             preq  = "req" if p.get("required") else "opt"
             hint = ""
@@ -50,11 +43,8 @@ def summarize_tracking_plan(tp):
                 if key in pname.lower() or key in desc_lower:
                     hint = f" ({val})"
                     break
-            props_list.append(f"{pname}[{ptype},{preq}]{hint}")
-        
-        summary.append(f"- {ename}: {', '.join(props_list)}")
-    
-    return "\n".join(summary) if summary else "No events found in tracking plan."
+            summary.append(f"{ename}|{pname}:{ptype}:{preq}{hint}")
+    return "\n".join(summary)
 
 def calculate_complexity(findings, tracking_plan):
     summary = findings.get("audit_summary", {})
@@ -66,246 +56,192 @@ def calculate_complexity(findings, tracking_plan):
     if len(tracking_plan.get("events", [])) > 25: return True
     return False
 
-# Severity badge colours keyed by mistake code
-_SEVERITY_PALETTE = {
-    "M0": ("#ff4444", "UNKNOWN EVENT"),
-    "M1": ("#ff8c00", "TYPE MISMATCH"),
-    "M2": ("#ff4444", "MISSING PROP"),
-    "M3": ("#ff8c00", "FUNNEL BREAK"),
-    "M4": ("#ff4444", "JOURNEY BREAK"),
-    "M5": ("#ffcc00", "CALC ERROR"),
-    "M6": ("#ffcc00", "IDENTITY"),
-    "M7": ("#aaaaaa", "DUPLICATE"),
-    "M8": ("#ff8c00", "ENUM VIOLATION"),
-}
-
 def _build_html_report(data: dict) -> str:
-    recs         = data.get("recommendations", [])
-    gaps         = data.get("tracking_plan_gaps", [])
-    meta         = data.get("audit_meta", {})
+    recs  = data.get("recommendations", [])
+    gaps  = data.get("tracking_plan_gaps", [])
+    meta  = data.get("audit_meta", {})
     summary_text = data.get("summary", data.get("executive_summary", ""))
 
-    # ── Severity config ──────────────────────────────────────────────────────
-    _VERDICT_CONFIG = {
-        "typo":          {"label": "TYPO",         "bg": "#2a1a00", "color": "#ffaa33", "icon": "⚠"},
-        "new_feature":   {"label": "NEW FEATURE",  "bg": "#001a2e", "color": "#4facfe", "icon": "✦"},
-        "test_artifact": {"label": "TEST ARTIFACT","bg": "#1a1a1a", "color": "#888899", "icon": "○"},
-        "missing":       {"label": "MISSING",      "bg": "#2a0a0a", "color": "#ff5555", "icon": "✕"},
-        "inconsistent":  {"label": "INCONSISTENT", "bg": "#1e1400", "color": "#ffcc00", "icon": "≠"},
-    }
-    _CODE_CONFIG = {
-        "M0": {"label": "UNKNOWN EVENT",  "bg": "#2a0a0a", "color": "#ff5555"},
-        "M1": {"label": "TYPE MISMATCH",  "bg": "#2a1500", "color": "#ff8c00"},
-        "M2": {"label": "MISSING PROP",   "bg": "#2a0a0a", "color": "#ff5555"},
-        "M3": {"label": "FUNNEL BREAK",   "bg": "#2a1500", "color": "#ff8c00"},
-        "M4": {"label": "JOURNEY BREAK",  "bg": "#2a0a0a", "color": "#ff5555"},
-        "M5": {"label": "CALC ERROR",     "bg": "#1e1400", "color": "#ffcc00"},
-        "M6": {"label": "IDENTITY",       "bg": "#1e1400", "color": "#ffcc00"},
-        "M7": {"label": "DUPLICATE",      "bg": "#1a1a1a", "color": "#888899"},
-        "M8": {"label": "ENUM VIOLATION", "bg": "#2a1500", "color": "#ff8c00"},
+    VERDICT_CONFIG = {
+        "typo":         {"color": "#f59e0b", "bg": "rgba(245,158,11,0.12)",  "label": "TYPO"},
+        "new_feature":  {"color": "#38bdf8", "bg": "rgba(56,189,248,0.12)",  "label": "NEW FEATURE"},
+        "test_artifact":{"color": "#94a3b8", "bg": "rgba(148,163,184,0.10)", "label": "TEST ARTIFACT"},
+        "not_in_tracking_plan": {"color": "#f87171", "bg": "rgba(248,113,113,0.12)", "label": "NOT IN PLAN"},
     }
 
-    def _severity_chip(label, bg, color):
-        return f"""<span style='display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:20px;background:{bg};color:{color};font-size:11px;font-weight:700;letter-spacing:0.8px;text-transform:uppercase;font-family:monospace;border:1px solid {color}44'>{label}</span>"""
-
-    # ── Recommendation cards ─────────────────────────────────────────────────
-    def _rec_card(idx, r):
+    def _rec_card(i, r):
         if isinstance(r, str):
-            title, detail, code_fix = r, "", ""
-        else:
-            title    = r.get("title") or r.get("recommendation") or "Recommendation"
-            detail   = r.get("detail") or r.get("description") or ""
-            code_fix = r.get("code_fix") or ""
+            return f"""<div class="rec-card"><div class="rec-num">{i+1}</div><div class="rec-body"><p class="rec-detail">{r}</p></div></div>"""
+        title    = r.get("title") or r.get("recommendation") or "Recommendation"
+        detail   = r.get("detail") or r.get("description") or ""
+        code_fix = r.get("code_fix") or ""
+        code_block = f'<pre><code>{code_fix}</code></pre>' if code_fix else ""
+        return f"""<div class="rec-card">
+  <div class="rec-num">{i+1}</div>
+  <div class="rec-body">
+    <p class="rec-title">{title}</p>
+    <p class="rec-detail">{detail}</p>
+    {code_block}
+  </div>
+</div>"""
 
-        if detail.lower().strip() == title.lower().strip() or detail.lower() in title.lower():
-            detail = ""
-
-        code_key = next((c for c in _CODE_CONFIG if c in title.upper()), None)
-        chip_html = ""
-        if code_key:
-            cfg = _CODE_CONFIG[code_key]
-            chip_html = _severity_chip(cfg["label"], cfg["bg"], cfg["color"])
-
-        code_block = ""
-        if code_fix:
-            escaped = code_fix.replace("<", "&lt;").replace(">", "&gt;")
-            code_block = f"""<div style='margin-top:14px;background:#080a10;border:1px solid #1e3020;border-radius:8px;overflow-x:auto'><pre style='padding:14px 16px;margin:0;font-size:12.5px;line-height:1.65;color:#7ec8a0;font-family:"Fira Code","Consolas",monospace'>{escaped}</pre></div>"""
-
-        return f"""
-        <div class='rec-card' style='background:#0f1219;border:1px solid #1c2030;border-radius:14px;padding:20px 22px;margin-bottom:12px;transition:border-color 0.2s ease' onmouseover="this.style.borderColor='#2a3d5e'" onmouseout="this.style.borderColor='#1c2030'">
-          <div style='display:flex;align-items:flex-start;gap:14px'>
-            <div style='flex-shrink:0;width:30px;height:30px;border-radius:50%;background:linear-gradient(135deg,#1a4a7a,#0d2d4d);border:1px solid #2a5a9a;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#6ab4f5;margin-top:2px'>{idx}</div>
-            <div style='flex:1;min-width:0'>
-              <div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:6px'>
-                <span style='font-weight:700;color:#dde4f5;font-size:15px;line-height:1.4'>{title}</span>
-                {chip_html}
-              </div>
-              {f'<div style="color:#8896b8;font-size:13.5px;line-height:1.75;margin-top:4px">{detail}</div>' if detail else ''}
-              {code_block}
-            </div>
-          </div>
-        </div>"""
-
-    # ── Gap rows ─────────────────────────────────────────────────────────────
     def _gap_row(g):
         name    = g.get("event_name", "Unknown")
         verdict = g.get("verdict", "unknown")
         reason  = g.get("reason", "")
-        cfg = _VERDICT_CONFIG.get(verdict.lower(), {"label": verdict.upper(), "bg": "#1a1a2a", "color": "#e94560", "icon": "?"})
-        chip = _severity_chip(f"{cfg['icon']} {cfg['label']}", cfg['bg'], cfg['color'])
-        return f"""
-        <div style='border:1px solid #1c2030;border-radius:12px;padding:16px 20px;margin-bottom:10px;background:#0c0f17'>
-          <div style='display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:8px'>
-            <code style='color:#88c8f5;font-size:13px;font-family:"Fira Code",monospace;font-weight:600'>{name}</code>
-            {chip}
-          </div>
-          <div style='color:#7a88aa;font-size:13.5px;line-height:1.7'>{reason}</div>
-        </div>"""
+        cfg     = VERDICT_CONFIG.get(verdict, {"color": "#e94560", "bg": "rgba(233,69,96,0.10)", "label": verdict.upper()})
+        badge   = f"<span class='badge' style='color:{cfg['color']};background:{cfg['bg']}'>{cfg['label']}</span>"
+        return f"<tr><td class='td-event'><code>{name}</code></td><td>{badge}</td><td class='td-reason'>{reason}</td></tr>"
 
-    recs_html = "\n".join(_rec_card(i + 1, r) for i, r in enumerate(recs))
+    recs_html = "\n".join(_rec_card(i, r) for i, r in enumerate(recs))
     gaps_html = "\n".join(_gap_row(g) for g in gaps)
 
-    model_name  = meta.get('model', 'Groq Llama 3.3')
-    iterations  = meta.get('iterations', '—')
-    tool_calls  = meta.get('tool_calls', '0')
-
     gaps_section = f"""
-    <section style='margin-bottom:36px'>
-      <div style='display:flex;align-items:center;gap:10px;margin-bottom:20px'>
-        <span style='font-size:18px'>&#x1F4CB;</span>
-        <h2 style='margin:0;font-size:17px;font-weight:700;color:#c8d4f0;letter-spacing:0.2px'>Predicted Tracking Plan Gaps</h2>
-        <span style='font-size:11px;font-weight:700;letter-spacing:0.8px;color:#e94560;background:#2a0a14;padding:3px 10px;border-radius:20px;border:1px solid #e9456044;text-transform:uppercase'>{len(gaps)} found</span>
-      </div>
-      <div>{gaps_html}</div>
-    </section>""" if gaps else ""
+<section class="section">
+  <h2><span class="section-icon">📋</span> Tracking Plan Gaps</h2>
+  <table class="gap-table">
+    <thead><tr><th>Event</th><th>Verdict</th><th>Reason</th></tr></thead>
+    <tbody>{gaps_html}</tbody>
+  </table>
+</section>""" if gaps else ""
 
-    summary_html = f"""
-    <section style='margin-bottom:36px'>
-      <div style='border-left:3px solid #2a5a9a;border-radius:0 10px 10px 0;background:#080e1a;padding:18px 22px'>
-        <div style='font-size:10px;font-weight:800;letter-spacing:2px;color:#4a7ab5;text-transform:uppercase;margin-bottom:10px'>Executive Overview</div>
-        <div style='color:#a8b8d4;font-size:14.5px;line-height:1.85'>{summary_text}</div>
-      </div>
-    </section>""" if summary_text else ""
+    summary_section = f"""
+<section class="section summary-box">
+  <h2><span class="section-icon">📊</span> Executive Summary</h2>
+  <p>{summary_text}</p>
+</section>""" if summary_text else ""
 
-    return f"""
-<!DOCTYPE html>
+    recs_section = f"""
+<section class="section">
+  <h2><span class="section-icon">🔧</span> Recommendations</h2>
+  <div class="rec-list">{recs_html}</div>
+</section>""" if recs else ""
+
+    return f"""<!DOCTYPE html>
 <html lang='en'>
 <head>
 <meta charset='UTF-8'>
-<meta name='viewport' content='width=device-width, initial-scale=1'>
-<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap' rel='stylesheet'>
+<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap' rel='stylesheet'>
+<script>
+  // Tell the parent Streamlit iframe to resize to fit this document's content
+  function resizeParent() {{
+    const h = document.documentElement.scrollHeight;
+    window.parent.postMessage({{type: 'streamlit:setFrameHeight', height: h}}, '*');
+  }}
+  window.addEventListener('load', resizeParent);
+  window.addEventListener('resize', resizeParent);
+  // Also fire after fonts load (Inter/JetBrains load async and change height)
+  document.fonts && document.fonts.ready.then(resizeParent);
+</script>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  html {{ scroll-behavior: smooth; }}
   body {{
-    font-family: 'Inter', -apple-system, sans-serif;
-    background: #080c14;
-    color: #c0cce0;
-    padding: 28px 32px 48px;
-    line-height: 1.6;
+    font-family: 'Inter', sans-serif;
+    background: #0d0f14;
+    color: #cbd5e1;
+    padding: 2rem 2.5rem;
     font-size: 14px;
-    min-height: 100vh;
+    line-height: 1.7;
   }}
+
+  /* ── Header ── */
   .report-header {{
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 16px;
-    background: #0c1220;
-    border: 1px solid #1c2a40;
-    border-radius: 16px;
-    padding: 24px 28px;
-    margin-bottom: 32px;
-    position: relative;
-    overflow: hidden;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    margin-bottom: 2rem; padding-bottom: 1.25rem;
+    border-bottom: 1px solid #1e2535;
   }}
-  .report-header::before {{
-    content: '';
-    position: absolute;
-    top: -40px; right: -40px;
-    width: 200px; height: 200px;
-    background: radial-gradient(circle, #1a3a6a22 0%, transparent 70%);
-    pointer-events: none;
+  .report-title {{ font-size: 1.5rem; font-weight: 700; color: #f1f5f9; letter-spacing: -0.3px; }}
+  .report-title span {{ background: linear-gradient(90deg,#4facfe,#00f2fe); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }}
+  .report-meta {{ font-size: 11px; color: #475569; text-align: right; line-height: 1.8; }}
+  .report-meta strong {{ color: #64748b; }}
+
+  /* ── Sections ── */
+  .section {{ margin-bottom: 2rem; }}
+  .section h2 {{
+    font-size: 0.85rem; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 1px; color: #94a3b8;
+    margin-bottom: 1rem; display: flex; align-items: center; gap: 0.4rem;
   }}
-  .report-title {{
-    font-size: 22px;
-    font-weight: 700;
-    color: #e0ecff;
-    letter-spacing: -0.3px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 4px;
+  .section-icon {{ font-size: 1rem; }}
+
+  /* ── Summary box ── */
+  .summary-box p {{
+    background: #131720; border: 1px solid #1e2d3d;
+    border-left: 3px solid #4facfe;
+    padding: 1rem 1.25rem; border-radius: 8px;
+    color: #94a3b8; font-size: 13.5px;
   }}
-  .report-subtitle {{ font-size: 12px; color: #4a6080; letter-spacing: 0.5px; }}
-  .meta-row {{ display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }}
-  .meta-tag {{
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: #0e1826;
-    border: 1px solid #1a2d45;
-    border-radius: 20px;
-    padding: 4px 12px;
-    font-size: 12px;
-    color: #6a8aaa;
-    font-weight: 500;
+
+  /* ── Recommendation cards ── */
+  .rec-list {{ display: flex; flex-direction: column; gap: 1rem; }}
+  .rec-card {{
+    display: flex; gap: 1rem;
+    background: #131720; border: 1px solid #1e2535;
+    border-radius: 10px; padding: 1.1rem 1.25rem;
+    transition: border-color .2s;
   }}
-  .meta-tag .dot {{ color: #3a7abd; font-size: 10px; }}
-  .section-header {{
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 18px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid #141c28;
+  .rec-card:hover {{ border-color: #2a3a55; }}
+  .rec-num {{
+    flex-shrink: 0;
+    width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(135deg,#4facfe22,#00f2fe22);
+    border: 1px solid #4facfe55;
+    color: #4facfe; font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    margin-top: 1px;
   }}
-  .section-label {{
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 2px;
-    text-transform: uppercase;
-    color: #3a6090;
+  .rec-body {{ flex: 1; min-width: 0; }}
+  .rec-title {{ font-weight: 600; color: #e2e8f0; margin-bottom: .35rem; font-size: 13.5px; }}
+  .rec-detail {{ color: #94a3b8; font-size: 13px; margin-bottom: .6rem; }}
+  pre {{
+    background: #0a0d12; border: 1px solid #1e2535;
+    border-radius: 7px; padding: .85rem 1rem;
+    overflow-x: auto; margin-top: .5rem;
   }}
-  .section-title {{
-    font-size: 16px;
-    font-weight: 600;
-    color: #c0d0e8;
-    margin: 0;
+  code {{
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px; color: #7dd3fc; line-height: 1.6;
   }}
-  .divider {{ height: 1px; background: #10182a; margin: 28px 0; }}
+
+  /* ── Gap table ── */
+  .gap-table {{
+    width: 100%; border-collapse: collapse;
+    background: #131720; border-radius: 10px; overflow: hidden;
+    border: 1px solid #1e2535;
+  }}
+  .gap-table thead tr {{ background: #0f1520; }}
+  .gap-table th {{
+    padding: .65rem 1rem; text-align: left;
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .8px; color: #475569;
+    border-bottom: 1px solid #1e2535;
+  }}
+  .gap-table tbody tr {{ border-bottom: 1px solid #1a2030; }}
+  .gap-table tbody tr:last-child {{ border-bottom: none; }}
+  .gap-table tbody tr:hover {{ background: #161c28; }}
+  .gap-table td {{ padding: .75rem 1rem; vertical-align: top; }}
+  .td-event code {{ color: #a5b4fc; font-size: 12.5px; }}
+  .td-reason {{ color: #94a3b8; font-size: 12.5px; }}
+  .badge {{
+    display: inline-block; padding: .2rem .6rem;
+    border-radius: 20px; font-size: 10.5px; font-weight: 600;
+    letter-spacing: .5px; white-space: nowrap;
+  }}
 </style>
 </head>
 <body>
 
-<header class='report-header'>
-  <div>
-    <div class='report-title'>
-      <span style='width:32px;height:32px;border-radius:8px;background:#0e1e36;border:1px solid #1a3050;display:inline-flex;align-items:center;justify-content:center;font-size:16px;flex-shrink:0'>&#x1F916;</span>
-      Kaliper AI Diagnostic Report
-    </div>
-    <div class='report-subtitle'>Autonomous analytics governance · Kaliper v3</div>
+<div class="report-header">
+  <div class="report-title">🤖 <span>Kaliper</span> Diagnostic Report</div>
+  <div class="report-meta">
+    <strong>Model</strong> {meta.get('model','—')}<br>
+    <strong>Iterations</strong> {meta.get('iterations','—')} &nbsp;·&nbsp;
+    <strong>Tool calls</strong> {meta.get('tool_calls','—')}
   </div>
-  <div class='meta-row'>
-    <div class='meta-tag'><span class='dot'>●</span> {model_name}</div>
-    <div class='meta-tag'>Iterations: {iterations}</div>
-    <div class='meta-tag'>Tool calls: {tool_calls}</div>
-  </div>
-</header>
+</div>
 
-{summary_html}
-
-<section style='margin-bottom:36px'>
-  <div class='section-header'>
-    <span class='section-label'>Remediation</span>
-    <h2 class='section-title'>Recommendations</h2>
-  </div>
-  {recs_html}
-</section>
-
-<div class='divider'></div>
-
+{summary_section}
+{recs_section}
 {gaps_section}
 
 </body></html>
@@ -422,17 +358,18 @@ def run_groq_audit_agent(
     all_findings = clustered_findings.get('clustered_findings', [])
     top_findings = sorted(all_findings, key=lambda x: x.get('count', 0), reverse=True)[:20]
 
-    # Aggressive truncation for Free Tier (6000 TPM limit)
-    if len(compact_plan) > 1000:
-        compact_plan = compact_plan[:1000] + "\n...(truncated for space)"
+    # Cap the compact plan to avoid blowing the context window
+    if len(compact_plan) > 2000:
+        compact_plan = compact_plan[:2000] + "\n...(truncated)"
 
+    # Cap the system prompt at 1500 chars to save space
     sys_prompt_trimmed = (system_prompt + DIAGNOSTICIAN_ADDENDUM)
-    if len(sys_prompt_trimmed) > 1500:
-        sys_prompt_trimmed = sys_prompt_trimmed[:1500] + "\n..."
+    if len(sys_prompt_trimmed) > 3000:
+        sys_prompt_trimmed = sys_prompt_trimmed[:3000] + "\n..."
 
     messages = [
         {"role": "system", "content": sys_prompt_trimmed},
-        {"role": "user", "content": f"SCHEMA:\n{compact_plan}\n\nTOP ISSUES:\n{json.dumps(top_findings, separators=(',', ':'))[:1000]}\n\nDiagnose now."}
+        {"role": "user", "content": f"""SCHEMA:\n{compact_plan}\n\nWINDOW: {start_iso or 'Unknown'} to {end_iso or 'Unknown'}\nEVENTS: {len(events)}\n\nTOP ISSUES (by frequency):\n{json.dumps(top_findings, separators=(',', ':'))}\n\nDiagnose root causes and return JSON per the contract."""}
     ]
 
     def _create_completion(model):
@@ -503,7 +440,7 @@ def run_groq_audit_agent(
                         "tool_call_id": tool_call.id,
                         "role": "tool",
                         "name": fn_name,
-                        "content": json.dumps(result)[:1000], # Truncate large tool outputs
+                        "content": json.dumps(result),
                     })
                 
                 # After processing all tool results, inject a forcing message

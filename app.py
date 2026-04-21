@@ -58,7 +58,7 @@ metadata = mcp_tools.load_audit_metadata()
 # Version sentinel — bump this string any time session_state keys or message
 # formats change. On first run after a code change, old cached values are wiped
 # cleanly instead of showing stale text from the previous version.
-_STATE_VERSION = "v9"
+_STATE_VERSION = "v8"
 if st.session_state.get("_state_version") != _STATE_VERSION:
     for _k in ["recency_msg", "snap_msg", "events_list", "audit_summary",
                "audit_issues", "alerts", "ai_analysis", "tracking_plan_gaps",
@@ -162,7 +162,7 @@ with st.sidebar:
                 st.session_state.snap_msg = None
                 with st.spinner("Scouting..."):
                     st.toast("Checking Amplitude ingestion health...")
-                    res = mcp_tools.get_amplitude_events(days_back=2, limit=500, api_key=amp_api_key, secret_key=amp_secret_key)
+                    res = mcp_tools.get_amplitude_events(days_back=7, api_key=amp_api_key, secret_key=amp_secret_key)
                     if "error" in res:
                         st.session_state.recency_msg = None
                         st.error(res["error"])
@@ -527,231 +527,138 @@ if st.session_state.audit_summary:
 
     # --- AI DIAGNOSIS RENDERING ---
     if st.session_state.ai_analysis and "html_report" in st.session_state.ai_analysis:
-        ai = st.session_state.ai_analysis
-        meta = ai.get("audit_meta", {})
-        verified_flag = meta.get("verified", False)
-        ext_history   = meta.get("external_history_used", False)
-
         st.markdown("---")
+        meta   = st.session_state.ai_analysis.get("audit_meta", {})
+        report = st.session_state.ai_analysis
 
-        # ── Header bar ──────────────────────────────────────────────────────
-        st.markdown("""
-        <style>
-        .kaliper-report-header {
-            background: linear-gradient(135deg, #0c1220 0%, #0e1630 100%);
-            border: 1px solid #1c2a40;
-            border-radius: 14px;
-            padding: 20px 24px;
-            margin-bottom: 6px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            flex-wrap: wrap;
-            gap: 12px;
-        }
-        .kaliper-report-title {
-            font-size: 20px;
-            font-weight: 700;
-            color: #ddeeff;
-            letter-spacing: -0.2px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-        .kaliper-meta-row { display: flex; gap: 8px; flex-wrap: wrap; }
-        .kaliper-meta-tag {
-            display: inline-flex; align-items: center; gap: 5px;
-            background: #0e1826; border: 1px solid #1a2d45;
-            border-radius: 20px; padding: 4px 12px;
-            font-size: 12px; color: #6a8aaa; font-weight: 500;
-        }
-        .kaliper-section-label {
-            font-size: 10px; font-weight: 700; letter-spacing: 2.5px;
-            text-transform: uppercase; color: #3a6090;
-            margin-bottom: 12px; display: block;
-        }
-        .kaliper-summary-box {
-            background: #080e1a;
-            border-left: 3px solid #2a5a9a;
-            border-radius: 0 10px 10px 0;
-            padding: 16px 20px;
-            color: #99aac4;
-            font-size: 14.5px;
-            line-height: 1.85;
-        }
-        .kaliper-rec-card {
-            background: #0b0f18;
-            border: 1px solid #181f2e;
-            border-radius: 12px;
-            padding: 16px 20px;
-            margin-bottom: 10px;
-        }
-        .kaliper-rec-card:hover { border-color: #2a3d5e; }
-        .kaliper-rec-num {
-            flex-shrink: 0;
-            width: 28px; height: 28px;
-            border-radius: 50%;
-            background: #0f2040;
-            border: 1px solid #1e4070;
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 12px;
-            font-weight: 700;
-            color: #5a9de0;
-        }
-        .kaliper-chip {
-            display: inline-flex; align-items: center;
-            padding: 2px 9px;
-            border-radius: 20px;
-            font-size: 11px;
-            font-weight: 700;
-            letter-spacing: 0.7px;
-            text-transform: uppercase;
-            font-family: monospace;
-        }
-        .kaliper-gap-card {
-            background: #090d14;
-            border: 1px solid #181f2e;
-            border-radius: 10px;
-            padding: 14px 18px;
-            margin-bottom: 8px;
-        }
-        .kaliper-code { font-family: 'Fira Code', monospace; font-size: 13px; color: #7ab8f0; }
-        </style>
-        """, unsafe_allow_html=True)
-
-        _model  = meta.get('model', 'Groq Llama 3.3')
-        _iters  = meta.get('iterations', '—')
-        _tools  = meta.get('tool_calls', '0')
-        _dot    = '🟢'
-
-        h1, h2 = st.columns([4, 1])
-        with h1:
-            st.markdown(f"""
-            <div class="kaliper-report-header">
-              <div class="kaliper-report-title">
-                🤖 AI Diagnostic Report
-              </div>
-              <div class="kaliper-meta-row">
-                <span class="kaliper-meta-tag">{_dot} {_model}</span>
-                <span class="kaliper-meta-tag">Iterations: {_iters}</span>
-                <span class="kaliper-meta-tag">Tool calls: {_tools}</span>
-              </div>
-            </div>
-            """, unsafe_allow_html=True)
-        with h2:
+        # Download button
+        dl_col, _ = st.columns([1, 3])
+        with dl_col:
             st.download_button(
-                "⬇ Download HTML",
-                data=ai["html_report"],
+                label="⬇️ Download Report",
+                data=report["html_report"],
                 file_name=f"Kaliper_Audit_{datetime.now().strftime('%Y%m%d_%H%M')}.html",
                 mime="text/html",
                 use_container_width=True
             )
 
-        if verified_flag and not ext_history:
-            st.success("✅ Ground-verified against audited batch")
-        elif verified_flag and ext_history:
-            st.info("🔍 Verified + supplemental user history used")
+        # ── Render report inline (no iframe, no black void) ──────────────────
+        summary_text = report.get("summary") or report.get("executive_summary", "")
+        recs  = report.get("recommendations", [])
+        gaps  = report.get("tracking_plan_gaps", [])
 
-        # ── Executive Summary ────────────────────────────────────────────────
-        summary_text = ai.get("summary") or ai.get("executive_summary", "")
+        st.markdown("""
+<style>
+.kai-header{display:flex;justify-content:space-between;align-items:flex-start;
+  border-bottom:1px solid #1e2535;padding-bottom:1rem;margin-bottom:1.5rem}
+.kai-title{font-size:1.3rem;font-weight:700;color:#f1f5f9}
+.kai-title span{background:linear-gradient(90deg,#4facfe,#00f2fe);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.kai-meta{font-size:11px;color:#475569;text-align:right;line-height:1.8}
+.kai-meta b{color:#64748b}
+.kai-label{font-size:0.72rem;font-weight:600;text-transform:uppercase;
+  letter-spacing:1px;color:#64748b;margin:1.5rem 0 0.75rem}
+.kai-summary-box{background:#131720;border:1px solid #1e2d3d;
+  border-left:3px solid #4facfe;padding:1rem 1.25rem;
+  border-radius:8px;color:#94a3b8;font-size:13.5px;line-height:1.7;margin-bottom:1rem}
+.kai-rec-card{display:flex;gap:1rem;background:#131720;border:1px solid #1e2535;
+  border-radius:10px;padding:1rem 1.25rem;margin-bottom:0.75rem}
+.kai-rec-num{flex-shrink:0;width:26px;height:26px;border-radius:50%;
+  background:rgba(79,172,254,0.08);border:1px solid rgba(79,172,254,0.3);
+  color:#4facfe;font-size:11px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;margin-top:2px}
+.kai-rec-title{font-weight:600;color:#e2e8f0;font-size:13.5px;margin-bottom:0.25rem}
+.kai-rec-detail{color:#94a3b8;font-size:13px;line-height:1.6}
+.kai-code{background:#0a0d12;border:1px solid #1e2535;border-radius:6px;
+  padding:0.75rem 1rem;margin-top:0.5rem;font-family:'JetBrains Mono',monospace;
+  font-size:12px;color:#7dd3fc;line-height:1.6;overflow-x:auto;white-space:pre}
+.kai-gap-table{width:100%;border-collapse:collapse;margin-top:0.5rem}
+.kai-gap-table th{font-size:11px;font-weight:600;text-transform:uppercase;
+  letter-spacing:.8px;color:#475569;padding:0.5rem 0.75rem;
+  border-bottom:1px solid #1e2535;text-align:left}
+.kai-gap-table td{padding:0.65rem 0.75rem;border-bottom:1px solid #141c28;
+  font-size:13px;color:#94a3b8;vertical-align:top}
+.kai-gap-table tr:last-child td{border-bottom:none}
+.kai-gap-event{font-family:monospace;color:#a5b4fc;font-size:12.5px}
+.kai-badge{display:inline-block;padding:.15rem .55rem;border-radius:20px;
+  font-size:10.5px;font-weight:600;letter-spacing:.5px;white-space:nowrap}
+</style>""", unsafe_allow_html=True)
+
+        # Header
+        verified_flag = meta.get("verified", False)
+        ext_history   = meta.get("external_history_used", False)
+        verified_tag  = " ✅ Ground-Verified" if (verified_flag and not ext_history) else (" 🔍 +Supplemental" if verified_flag else "")
+        st.markdown(f"""
+<div class="kai-header">
+  <div class="kai-title">🤖 <span>Kaliper</span> Diagnostic Report</div>
+  <div class="kai-meta">
+    <b>Model</b> {meta.get('model','—')}<br>
+    <b>Iterations</b> {meta.get('iterations','—')} · <b>Tools</b> {meta.get('tool_calls','—')}{verified_tag}
+  </div>
+</div>""", unsafe_allow_html=True)
+
+        # Summary
         if summary_text:
-            st.markdown('<span class="kaliper-section-label">Executive Overview</span>', unsafe_allow_html=True)
-            st.markdown(f'<div class="kaliper-summary-box">{summary_text}</div>', unsafe_allow_html=True)
-            st.markdown("<br>", unsafe_allow_html=True)
+            st.markdown('<div class="kai-label">📊 Executive Summary</div>', unsafe_allow_html=True)
+            st.markdown(f'<div class="kai-summary-box">{summary_text}</div>', unsafe_allow_html=True)
 
-        # ── Recommendations ──────────────────────────────────────────────────
-        recs = ai.get("recommendations", [])
+        # Recommendations
         if recs:
-            _CODE_CHIPS = {
-                "M0": ("#ff5555", "#2a0a0a", "UNKNOWN EVENT"),
-                "M1": ("#ff8c00", "#2a1500", "TYPE MISMATCH"),
-                "M2": ("#ff5555", "#2a0a0a", "MISSING PROP"),
-                "M3": ("#ff8c00", "#2a1500", "FUNNEL BREAK"),
-                "M4": ("#ff5555", "#2a0a0a", "JOURNEY BREAK"),
-                "M5": ("#ffcc00", "#1e1400", "CALC ERROR"),
-                "M6": ("#ffcc00", "#1e1400", "IDENTITY"),
-                "M7": ("#888899", "#1a1a1a", "DUPLICATE"),
-                "M8": ("#ff8c00", "#2a1500", "ENUM VIOLATION"),
-            }
-            st.markdown('<span class="kaliper-section-label">Remediation</span>', unsafe_allow_html=True)
+            st.markdown('<div class="kai-label">🔧 Recommendations</div>', unsafe_allow_html=True)
             for i, r in enumerate(recs):
                 if isinstance(r, str):
-                    title, detail, code_fix = r, "", ""
+                    title, detail, code_fix = "Recommendation", r, ""
                 else:
                     title    = r.get("title") or r.get("recommendation") or "Recommendation"
                     detail   = r.get("detail") or r.get("description") or ""
                     code_fix = r.get("code_fix") or ""
-                if detail.lower().strip() == title.lower().strip() or (detail and detail.lower() in title.lower()):
-                    detail = ""
-                code_key = next((c for c in _CODE_CHIPS if c in title.upper()), None)
-                chip_html = ""
-                if code_key:
-                    col, bg, lbl = _CODE_CHIPS[code_key]
-                    chip_html = f"<span class='kaliper-chip' style='color:{col};background:{bg};border:1px solid {col}44'>{lbl}</span>"
-                escaped_fix = ""
-                if code_fix:
-                    escaped_fix = code_fix.replace("<", "&lt;").replace(">", "&gt;")
-                    escaped_fix = f"<div style='margin-top:12px;background:#060810;border:1px solid #162018;border-radius:8px;overflow-x:auto'><pre style='padding:12px 16px;margin:0;font-size:12px;line-height:1.6;color:#7ec8a0;font-family:monospace'>{escaped_fix}</pre></div>"
-                detail_html = f"<div style='color:#7a8aaa;font-size:13.5px;line-height:1.75;margin-top:4px'>{detail}</div>" if detail else ""
-                st.markdown(
-                    f"<div class='kaliper-rec-card'>"
-                    f"<div style='display:flex;align-items:flex-start;gap:12px'>"
-                    f"<div class='kaliper-rec-num'>{i+1}</div>"
-                    f"<div style='flex:1;min-width:0'>"
-                    f"<div style='display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:5px'>"
-                    f"<span style='font-weight:600;color:#ccd8f0;font-size:15px'>{title}</span>"
-                    f"{chip_html}"
-                    f"</div>"
-                    f"{detail_html}"
-                    f"{escaped_fix}"
-                    f"</div></div></div>",
-                    unsafe_allow_html=True
-                )
+                code_block = f'<div class="kai-code">{code_fix}</div>' if code_fix else ""
+                st.markdown(f"""
+<div class="kai-rec-card">
+  <div class="kai-rec-num">{i+1}</div>
+  <div style="flex:1;min-width:0">
+    <div class="kai-rec-title">{title}</div>
+    <div class="kai-rec-detail">{detail}</div>
+    {code_block}
+  </div>
+</div>""", unsafe_allow_html=True)
 
-        # ── Tracking Plan Gaps ───────────────────────────────────────────────
-        gaps = ai.get("tracking_plan_gaps", []) or st.session_state.tracking_plan_gaps
+        # Tracking Plan Gaps
+        VERDICT_STYLES = {
+            "typo":                 ("#f59e0b", "rgba(245,158,11,0.12)",  "TYPO"),
+            "new_feature":          ("#38bdf8", "rgba(56,189,248,0.12)",  "NEW FEATURE"),
+            "test_artifact":        ("#94a3b8", "rgba(148,163,184,0.10)", "TEST ARTIFACT"),
+            "not_in_tracking_plan": ("#f87171", "rgba(248,113,113,0.12)", "NOT IN PLAN"),
+        }
         if gaps:
-            _VERDICT_CFG = {
-                "typo":          ("#ffaa33", "#2a1a00", "⚠ TYPO"),
-                "new_feature":   ("#4facfe", "#001a2e", "✦ NEW FEATURE"),
-                "test_artifact": ("#888899", "#1a1a1a", "○ TEST ARTIFACT"),
-                "missing":       ("#ff5555", "#2a0a0a", "✕ MISSING"),
-                "inconsistent":  ("#ffcc00", "#1e1400", "≠ INCONSISTENT"),
-            }
-            st.markdown("---")
-            col_g1, col_g2 = st.columns([6, 1])
-            with col_g1:
-                st.markdown(f'<span class="kaliper-section-label">Discrepancies — {len(gaps)} gap{"s" if len(gaps) != 1 else ""} detected</span>', unsafe_allow_html=True)
+            st.markdown('<div class="kai-label">📋 Tracking Plan Gaps</div>', unsafe_allow_html=True)
+            rows = ""
             for g in gaps:
                 name    = g.get("event_name", "Unknown")
                 verdict = g.get("verdict", "unknown")
                 reason  = g.get("reason", "")
-                col_c, bg_c, lbl_c = _VERDICT_CFG.get(verdict.lower(), ("#e94560", "#2a0814", verdict.upper()))
-                chip = f"<span class='kaliper-chip' style='color:{col_c};background:{bg_c};border:1px solid {col_c}44'>{lbl_c}</span>"
-                st.markdown(f"""
-                <div class="kaliper-gap-card">
-                  <div style='display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:7px'>
-                    <code class="kaliper-code">{name}</code>
-                    {chip}
-                  </div>
-                  <div style='color:#6a7a9a;font-size:13.5px;line-height:1.7'>{reason}</div>
-                </div>
-                """, unsafe_allow_html=True)
+                col, bg, label = VERDICT_STYLES.get(verdict, ("#e94560", "rgba(233,69,96,0.10)", verdict.upper()))
+                badge = f"<span class='kai-badge' style='color:{col};background:{bg}'>{label}</span>"
+                rows += f"<tr><td class='kai-gap-event'>{name}</td><td>{badge}</td><td>{reason}</td></tr>"
+            st.markdown(f"""
+<table class="kai-gap-table">
+  <thead><tr><th>Event</th><th>Verdict</th><th>Reason</th></tr></thead>
+  <tbody>{rows}</tbody>
+</table>""", unsafe_allow_html=True)
 
-        # ── Evidence trace ───────────────────────────────────────────────────
+        # Tool trace
         if meta.get("tool_trace"):
-            with st.expander("🔍 Evidence & Verification (Data Trace)", expanded=False):
+            with st.expander("🔍 Evidence & Verification (Data Trace)"):
                 for t in meta["tool_trace"]:
-                    source_label = "supplemental" if t.get("external") else "audited batch"
-                    cols = st.columns([1, 2, 3])
-                    cols[0].code(t['tool'])
-                    cols[1].caption(f"`{t['target']}` · *{source_label}*")
-                    cols[2].info(t['observation'])
+                    source_label = " *(supplemental)*" if t.get("external") else " *(audited batch)*"
+                    st.markdown(f"**Tool:** `{t['tool']}` | **Target:** `{t['target']}`{source_label}")
+                    st.info(f"**Observation:** {t['observation']}")
+
+    # NOTE: Tracking plan gaps are already rendered inside the HTML report above.
+    # The block below is intentionally removed to avoid duplicate rendering.
 
     if st.session_state.audit_issues:
-        with st.expander("⬇ Export Raw Audit Findings", expanded=False):
+        with st.expander("Export Raw Audit Findings"):
             csv = pd.DataFrame(st.session_state.audit_issues).to_csv(index=False).encode('utf-8')
             st.download_button("Download CSV Log", data=csv, file_name="audit_issues.csv", mime="text/csv")
 

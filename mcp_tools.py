@@ -77,42 +77,59 @@ def execute_get_amplitude_events(tool_params, config):
     secret_key = config.get("secret_key") or os.getenv("AMPLITUDE_SECRET_KEY")
     start_str  = tool_params.get("start")
     end_str    = tool_params.get("end")
-    limit      = tool_params.get("limit")  # Optional: stop once this many events are fetched
     if not (start_str and end_str):
         db = tool_params.get("days_back", 3)
-        e_t, s_t = datetime.utcnow(), datetime.utcnow() - timedelta(days=db)
+        # BUG FIX: Amplitude Export API never serves the current incomplete hour.
+        # Clamp end to the most recently COMPLETED hour (i.e. truncate 'now' back by 1h).
+        # Without this, the last chunk always returns 404, making the fetch appear empty.
+        now_utc = datetime.utcnow().replace(minute=0, second=0, microsecond=0)
+        e_t = now_utc - timedelta(hours=1)          # last fully completed hour
+        s_t = e_t - timedelta(days=db)
         start_str, end_str = s_t.strftime("%Y%m%dT%H"), e_t.strftime("%Y%m%dT%H")
     if not (api_key and secret_key): return {"error": "Missing keys."}
     all_events = []
     try:
         dt_s, dt_e = datetime.strptime(start_str, "%Y%m%dT%H"), datetime.strptime(end_str, "%Y%m%dT%H")
-        # Build chunks in REVERSE order (newest first) so health checks find recent events fast
-        chunks = []
+        if dt_s >= dt_e:
+            return {"error": f"Invalid time window: start ({start_str}) must be before end ({end_str})."}
         curr = dt_s
         while curr < dt_e:
             chunk_e = min(curr + timedelta(hours=24), dt_e)
-            chunks.append((curr, chunk_e))
-            curr = chunk_e
-        chunks = list(reversed(chunks))
-        for chunk_s, chunk_e in chunks:
-            url = f"https://amplitude.com/api/2/export?start={chunk_s.strftime('%Y%m%dT%H')}&end={chunk_e.strftime('%Y%m%dT%H')}"
-            resp = requests.get(url, auth=HTTPBasicAuth(api_key, secret_key), stream=True, timeout=(10, 180))
-            if resp.status_code == 200:
-                with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
-                    for fn in z.namelist():
-                        if fn.endswith(".json.gz"):
-                            with z.open(fn) as f:
-                                for line in zlib.decompress(f.read(), 16+zlib.MAX_WBITS).decode('utf-8').splitlines():
-                                    if line.strip():
-                                        ev = json.loads(line)
-                                        if 'time' not in ev:
-                                            dt = _extract_event_time(ev)
-                                            if dt: ev['time'] = int(dt.timestamp() * 1000)
-                                        all_events.append(ev)
-            # Stop early if a limit was specified and we have enough events
-            if limit and len(all_events) >= limit:
+            # BUG FIX: Guard against zero-width chunks that cause an infinite loop.
+            # This can happen when dt_e is within the same hour as curr.
+            if chunk_e <= curr:
                 break
-    except Exception as e: return {"error": str(e)}
+            url = f"https://amplitude.com/api/2/export?start={curr.strftime('%Y%m%dT%H')}&end={chunk_e.strftime('%Y%m%dT%H')}"
+            try:
+                resp = requests.get(url, auth=HTTPBasicAuth(api_key, secret_key), stream=True, timeout=(10, 60))
+            except requests.exceptions.Timeout:
+                print(f"[mcp_tools] Timeout on chunk {curr.strftime('%Y%m%dT%H')} — skipping")
+                curr = chunk_e
+                continue
+            except requests.exceptions.ConnectionError as ce:
+                return {"error": f"Cannot reach Amplitude (connection error): {ce}"}
+            if resp.status_code == 200:
+                try:
+                    with zipfile.ZipFile(io.BytesIO(resp.content)) as z:
+                        for fn in z.namelist():
+                            if fn.endswith(".json.gz"):
+                                with z.open(fn) as f:
+                                    for line in zlib.decompress(f.read(), 16+zlib.MAX_WBITS).decode('utf-8').splitlines():
+                                        if line.strip():
+                                            ev = json.loads(line)
+                                            if 'time' not in ev:
+                                                dt = _extract_event_time(ev)
+                                                if dt: ev['time'] = int(dt.timestamp() * 1000)
+                                            all_events.append(ev)
+                except zipfile.BadZipFile:
+                    pass
+            elif resp.status_code == 404:
+                pass
+            else:
+                print(f"[mcp_tools] Amplitude API {resp.status_code} for chunk {curr.strftime('%Y%m%dT%H')}: {resp.text[:200]}")
+            curr = chunk_e
+    except Exception as e:
+        return {"error": str(e)}
     return {"status": "success", "events": all_events}
 
 def execute_get_user_history(tool_params, config):
@@ -162,14 +179,7 @@ def execute_run_comprehensive_audit(tool_params, config):
             with open("simulated_events.json", "r") as f: events = json.load(f)
         except: return {"error": "No data provided for audit."}
     
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    t_plan = os.getenv("TRACKING_PLAN_PATH")
-    if not t_plan:
-        t_plan = os.path.join(base_dir, "tracking_plan.xlsx")
-    
-    if not os.path.exists(t_plan):
-        return {"error": f"Tracking plan not found at {t_plan}. Please check TRACKING_PLAN_PATH in .env"}
-
+    t_plan = os.getenv("TRACKING_PLAN_PATH", "tracking_plan.xlsx")
     engine = AuditEngine(t_plan, events)
     summary, issues = engine.run_all_checks()
     
@@ -211,14 +221,7 @@ def execute_audit_amplitude_direct(tool_params, config):
     if not events: return {"error": "No events found in Amplitude for the specified window."}
     
     print(f"[mcp] Fetched {len(events)} events. Starting audit...")
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    t_plan = os.getenv("TRACKING_PLAN_PATH")
-    if not t_plan:
-        t_plan = os.path.join(base_dir, "tracking_plan.xlsx")
-    
-    if not os.path.exists(t_plan):
-        return {"error": f"Tracking plan not found at {t_plan}. Please check TRACKING_PLAN_PATH in .env"}
-
+    t_plan = os.getenv("TRACKING_PLAN_PATH", "tracking_plan.xlsx")
     engine = AuditEngine(t_plan, events)
     summary, issues = engine.run_all_checks()
     
@@ -249,8 +252,8 @@ def execute_audit_amplitude_direct(tool_params, config):
         "clustered_findings": list(clusters.values())
     }
 
-def get_amplitude_events(days_back=3, start=None, end=None, limit=None, **config):
-    return execute_get_amplitude_events({"days_back": days_back, "start": start, "end": end, "limit": limit}, config)
+def get_amplitude_events(days_back=3, start=None, end=None, **config):
+    return execute_get_amplitude_events({"days_back": days_back, "start": start, "end": end}, config)
 
 def get_user_history(user_id=None, **config):
     return execute_get_user_history({"user_id": user_id}, config)
